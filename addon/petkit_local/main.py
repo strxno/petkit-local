@@ -115,6 +115,12 @@ def main() -> None:
     # line.
     parser.add_argument("--web-port", type=int, default=None, help="Web panel port (default 8099)")
     parser.add_argument("--bucket-port", type=int, default=None, help="Media upload bucket port (default 9000)")
+    # Override the derived https://<api-host>:<bucket-port> when the device
+    # must hit a different hostname for uploads (e.g. a dedicated DNS name
+    # that terminates TLS on the bucket listener).
+    parser.add_argument("--bucket-endpoint", default=None,
+                        help="Media bucket base URL the device is told to use "
+                             "(default: https://<api-url host>:<bucket-port>)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--ha-addon", action="store_true", help="Self-configure from /data/options.json + Supervisor (HA add-on mode)")
     args = parser.parse_args()
@@ -155,6 +161,8 @@ def main() -> None:
             config.web_port = args.web_port
         if args.bucket_port is not None:
             config.bucket_port = args.bucket_port
+        if args.bucket_endpoint:
+            config.bucket_endpoint = args.bucket_endpoint
         if args.debug:
             config.log_level = "DEBUG"
 
@@ -165,9 +173,9 @@ def main() -> None:
         # with them silently off however the panel was left.
         config.apply_panel_overrides()
 
-    # After the flags, because --api-url and --bucket-port both feed it. The
-    # add-on path already has an endpoint from the Supervisor, so this is a
-    # no-op there.
+    # After the flags, because --api-url, --bucket-port and --bucket-endpoint
+    # all feed it. The add-on path already has an endpoint from the Supervisor,
+    # so this is a no-op there (and an explicit --bucket-endpoint wins too).
     config.resolve_bucket_endpoint()
 
     logging.basicConfig(
