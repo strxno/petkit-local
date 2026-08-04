@@ -808,12 +808,30 @@ class Device:
         return cmds
 
     def to_dict(self) -> dict[str, Any]:
-        """The persisted form: identity, MQTT credentials and `config` only.
+        """The persisted form: identity, MQTT credentials, `config` AND `state`.
 
-        Live state (`state`, `command_queue`, the liveness timestamps and flags)
-        is deliberately excluded — it is re-derived from the device's next
-        contact, and persisting it would resurrect a stale "online" after a
-        restart.
+        `state` is included deliberately, and this reverses an earlier design:
+        the firmware's own refetch timers (`main()` decompile, D4SH/T5/T6/W7H
+        alike) are `net_dev_get_device_info` and `net_dev_state_report` every
+        **8 hours**, `net_dev_ble_device_list_get` every 24 — confirmed no
+        protocol command or signal hook can shrink that from outside the
+        device. So excluding `state` here does not mean "a brief gap until the
+        device checks back in" — it means every HA entity bound to `state.*`
+        goes blank for up to 8 HOURS after every restart of this add-on, which
+        is the actual failure this add-on exists to not have. petkit-local is
+        the only place this data lives now that the device is off PetKit's
+        cloud, so it is the one that has to hold onto it.
+
+        Still deliberately EXCLUDED: `command_queue` (in-flight, replaying it
+        after a restart could resend a stale command) and the liveness
+        surface — `last_heartbeat`/`last_state_report`/`last_seen`/`last_mqtt`,
+        `mqtt_subscriptions`, `online`, `mqtt_connected`, `mqtt_connected_at`.
+        THAT part of the original reasoning still holds: persisting "online"
+        would resurrect a stale connected status for a device that may have
+        gone offline while this add-on was down. Only the sensor/settings
+        VALUES in `state` are safe to redisplay as last-known; whether the
+        device is currently reachable is re-derived from actual contact, same
+        as before.
         """
         return {
             "device_type": self.device_type,
@@ -826,6 +844,7 @@ class Device:
             "mqtt_device_secret": self.mqtt_device_secret,
             "api_secret": self.api_secret,
             "config": self.config,
+            "state": self.state,
             "created_at": self.created_at,
         }
 
@@ -852,5 +871,6 @@ class Device:
         d.mqtt_device_secret = data.get("mqtt_device_secret", d.mqtt_device_secret)
         d.api_secret = data.get("api_secret", d.api_secret)
         d.config = data.get("config", {})
+        d.state = data.get("state", {})
         d.created_at = data.get("created_at", d.created_at)
         return d

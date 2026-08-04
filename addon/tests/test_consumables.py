@@ -56,19 +56,25 @@ def test_pressing_reset_n60_records_the_date_and_still_sends_the_real_command():
     assert dev.config[CONSUMABLE_RECORD_KEY]["n60"] > 0
 
 
-def test_the_record_survives_a_restart_which_wipes_state():
-    # `state` is rebuilt from the device's next contact; `config` persists. For
-    # the N50 there is no next contact that would ever carry the date, so
-    # storing it in state would lose it on every add-on restart.
+def test_the_record_survives_a_restart_and_so_does_state_now():
+    # `config` has always persisted. `state` now does too (devices/base.py::
+    # Device.to_dict) — the firmware's own refetch timers are 8h
+    # (net_dev_get_device_info/net_dev_state_report) and 24h
+    # (net_dev_ble_device_list_get), confirmed from the main() decompile, so
+    # "wait for the device's next contact" meant every HA entity going blank
+    # for up to 8 hours after every add-on restart. `apply_consumable_state`
+    # must still recompute the SAME correct value from `config` regardless —
+    # config is the durable record; state is just what gets redisplayed.
     dev = _dev()
     record_consumable_reset(dev, "n50", time.time() - 10.5 * 86400)
     record_consumable_reset(dev, "n60", time.time() - 10.5 * 86400)
 
     restarted = Device.from_dict(json.loads(json.dumps(dev.to_dict())))
-    assert restarted.state == {}, "state is not persisted, and must not be"
+    # 10.5 days used, so 19.5/34.5 remain -> rounded up, a part-used day counts.
+    assert restarted.state["deodorantLeftDays"] == DEODORANT_TOTAL_DAYS - 10
+    assert restarted.state["sprayLeftDays"] == SPRAY_TOTAL_DAYS - 10
 
     apply_consumable_state(restarted)
-    # 10.5 days used, so 19.5/34.5 remain -> rounded up, a part-used day counts.
     assert restarted.state["deodorantLeftDays"] == DEODORANT_TOTAL_DAYS - 10
     assert restarted.state["sprayLeftDays"] == SPRAY_TOTAL_DAYS - 10
 
@@ -83,7 +89,7 @@ def test_to_device_info_echoes_the_recorded_stamp_rather_than_zero():
     record_consumable_reset(dev, "n60", stamp)
 
     restarted = Device.from_dict(json.loads(json.dumps(dev.to_dict())))
-    assert restarted.state == {}
+    # state is now persisted; config still holds the authoritative record
     assert int(restarted.to_device_info()["result"]["sprayResetTime"]) == int(stamp)
 
     # A device we have never heard from still gets 0 -- there is nothing to
@@ -136,17 +142,16 @@ def test_every_state_refresh_site_recomputes_the_countdowns():
 
 
 def test_the_countdowns_are_ready_before_the_device_says_anything():
-    """A restart wipes `state`, and the N50 has no device input that would ever
-    refill it -- so reading the countdown must not depend on the device
-    reporting first, or "N50 Days Left" is unknown after every restart. Both
-    document builders recompute, which also keeps the number honest as the
-    calendar moves under a device that has gone quiet."""
+    """The N50 has no device input that would ever refill it -- so reading
+    the countdown must not depend on the device reporting first, or "N50
+    Days Left" is unknown after every restart. State is now persisted, but
+    the countdown still comes from config (which is the durable record)
+    via apply_consumable_state in the document builders."""
     from petkit_local.web.panel import _state_doc
 
     dev = _dev()
     record_consumable_reset(dev, "n50", time.time() - 4 * 86400)
     restarted = Device.from_dict(json.loads(json.dumps(dev.to_dict())))
-    assert restarted.state == {}
 
     doc = _state_doc(restarted)
     assert doc["state"]["deodorantLeftDays"] == DEODORANT_TOTAL_DAYS - 4
