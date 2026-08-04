@@ -453,10 +453,16 @@ class Device:
     def to_device_info(self, ble_registry: BLERegistry | None = None) -> dict[str, Any]:
         """`dev_device_info` — the device's own full configuration, as it sees it.
 
-        Camera litters additionally get the `capacity[]` / `cloudProduct` block
-        that stands in for a cloud subscription, and, when `ble_registry` is
-        given, the embedded K3 purifier block (`withK3`, `k3Device`,
-        `settings.k3Config`) for whichever K3 is linked to this device.
+        Camera models get the `capacity[]` / `cloudProduct` block that stands in
+        for a cloud subscription: firmware gates continuous recording
+        (`cloud_cvr_start`) on `fullVideo`'s `workTime`/`indate` window, and an
+        expired or missing entry silently leaves CVR off with an empty upload
+        queue. `indate` is therefore the same far-future stamp STS already uses
+        for `cycleExpiration` (~2100), not a real billing window.
+
+        Camera litters additionally get spray/deodorant tip fields. When
+        `ble_registry` is given, litters also get the embedded K3 purifier block
+        (`withK3`, `k3Device`, `settings.k3Config`) for whichever K3 is linked.
 
         NOTE, and unlike its siblings, this method is NOT pure: the `settings`
         block in the result is the device's own `config["settings"]` dict rather
@@ -483,23 +489,9 @@ class Device:
             "hertz": 50,
         }
 
-        if self.is_litter and self.is_camera:
+        if self.is_camera:
             now = int(time.time())
             far = 4102444800
-            result["sprayDays"] = SPRAY_TOTAL_DAYS
-            # Falls back to the stamp we recorded, because `state` is empty for
-            # the first moments after a restart and the firmware has a setter
-            # for this field (`set sprayResetTime (%d)` in `ctrl`). Echoing a
-            # zero there would push the N60 countdown's origin back to now on
-            # the box itself, silently costing the owner the rest of a
-            # cartridge's warning. PetKit's own reply carries the true value.
-            recorded = (self.config.get(CONSUMABLE_RECORD_KEY) or {}).get("n60")
-            result["sprayResetTime"] = (to_float(self.state.get("sprayResetTime"), 0)
-                                        or to_float(recorded, 0))
-            result["tooManyPets"] = 0
-            result["frequencyPetTip"] = 0
-            result["deodorantTip"] = 0
-            result["purificationTip"] = 0
             # Mirrors to_oss_sts's capability[] set — a disabled capability
             # must disappear from BOTH so the device doesn't see conflicting
             # answers about what it's allowed to upload.
@@ -515,6 +507,22 @@ class Device:
                 "chargeType": "LOCAL",
                 "subscribe": 0,
             }
+
+        if self.is_litter and self.is_camera:
+            result["sprayDays"] = SPRAY_TOTAL_DAYS
+            # Falls back to the stamp we recorded, because `state` is empty for
+            # the first moments after a restart and the firmware has a setter
+            # for this field (`set sprayResetTime (%d)` in `ctrl`). Echoing a
+            # zero there would push the N60 countdown's origin back to now on
+            # the box itself, silently costing the owner the rest of a
+            # cartridge's warning. PetKit's own reply carries the true value.
+            recorded = (self.config.get(CONSUMABLE_RECORD_KEY) or {}).get("n60")
+            result["sprayResetTime"] = (to_float(self.state.get("sprayResetTime"), 0)
+                                        or to_float(recorded, 0))
+            result["tooManyPets"] = 0
+            result["frequencyPetTip"] = 0
+            result["deodorantTip"] = 0
+            result["purificationTip"] = 0
 
         if ble_registry and self.is_litter:
             k3 = ble_registry.get_linked_k3(self.petkit_id)
@@ -613,8 +621,28 @@ class Device:
 
         Every value in the result is a JSON-encoded STRING, not a nested object
         (verified against the real PetKit cloud), and each such string wraps its
-        own key again. `cameraMultiRange` is an array of schedule objects
-        `[{enable, rpt, time}]` rather than a bare range pair.
+        own key again.
+
+        Two incompatible wire shapes share these field names, and which one a
+        given field expects is PER DEVICE, not fixed by the field name alone
+        (`docs/SETTINGS_SCHEMA.md` Part 1): a flat range-pair array
+        `[[start,end], ...]` ("Format A"), or an array of schedule objects
+        `[{rpt, time}]` ("Format B", `enable` is accepted but never read).
+        `pk_parse_cameraMultiNew_func`-family parsers read `rpt`/`time` off
+        each element as a JSON object; feeding them a bare `[[0,1440]]` makes
+        every lookup null and leaves `cameraRangeTable` empty. The mirror
+        mistake — feeding Format B to a Format-A field — fails just as
+        silently the other way: `cJSON_IsArray` on a dict element is false, so
+        every entry is skipped and that table stays empty too.
+
+        On litter boxes (T5/T6) and the W7H fountain, `cameraMultiRange` IS
+        the Format-B gating field — T5/T6 have no separate `cameraMultiNew` at
+        all. On the D4SH feeder, `cameraMultiRange` and `cameraMultiNew` are
+        two DIFFERENT fields: `cameraMultiRange` is the legacy Format-A slot
+        table, parsed independently and inline; `cameraMultiNew` is the
+        Format-B field that actually gates `cloud_cvr_start`. Sending Format B
+        to D4SH's `cameraMultiRange` doesn't break recording — `cameraMultiNew`
+        still gates that — but silently empties the legacy table's own effect.
 
         The `distrubMultiRange` misspelling is intentional: it is what the
         firmware sends and expects, so correcting it here would silently drop
@@ -636,10 +664,33 @@ class Device:
                 result["toneMultiRange"] = mc("toneMultiRange", [[1320, 360]])
             return {"result": result}
         if self.is_feeder and self.is_camera:
+            # D4SH only: `cameraMultiRange` and `cameraMultiNew` are two
+            # DIFFERENT fields with DIFFERENT shapes here (unlike T5/T6/W7H,
+            # where `cameraMultiRange` alone is the Format-B gating field).
+            # `cameraMultiNew` is Format B and is what actually gates
+            # `cloud_cvr_start` — a bare `[[0,1440]]` there makes
+            # `pk_parse_cameraMultiNew_func`'s `cJSON_GetObjectItem(item,
+            # "time")` return null on every element, so `cameraRangeTable`
+            # stays empty and media logs "camera not enable" despite
+            # `camera: 1`. `cameraMultiRange` is D4SH's legacy Format-A slot
+            # table, parsed inline and independently — sending it Format B
+            # objects instead of `[start,end]` pairs fails the parser's
+            # `cJSON_IsArray` check on every element just as silently.
+            always_on = [{"enable": 1, "rpt": "1,2,3,4,5,6,7", "time": [[0, 1440]]}]
             return {"result": {
                 "detectMultiRange": mc("detectMultiRange", [[0, 1440]]),
-                "cameraMultiNew": mc("cameraMultiNew", [[0, 1440]]),
+                "cameraMultiRange": mc("cameraMultiRange", [[0, 1440]]),
+                "cameraMultiNew": mc("cameraMultiNew", always_on),
                 "toneMultiRange": mc("toneMultiRange", [[1320, 360]]),
+                "lightMultiRange": mc("lightMultiRange", [[0, 1440]]),
+            }}
+        if self.is_water_fountain and self.is_camera:
+            # W7H: `cameraMultiRange` alone is the Format-B gating field, same
+            # pattern as T5/T6 — W7H has no `cameraMultiNew` field at all, so
+            # unlike the D4SH branch above there is only one key to send.
+            always_on = [{"enable": 1, "rpt": "1,2,3,4,5,6,7", "time": [[0, 1440]]}]
+            return {"result": {
+                "cameraMultiRange": mc("cameraMultiRange", always_on),
                 "lightMultiRange": mc("lightMultiRange", [[0, 1440]]),
             }}
         return {"result": {}}

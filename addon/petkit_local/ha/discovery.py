@@ -269,6 +269,8 @@ def _value_template(entity: EntityDef) -> str:
     if entity.component in ("binary_sensor", "switch"):
         return "{{ 'ON' if " + accessor + " | default(false) else 'OFF' }}"
     if entity.component == "select":
+        if entity.key == "surplus_level":
+            return _surplus_level_value_template(accessor)
         return _select_value_template(entity, accessor)
     if entity.component == "sensor" and entity.options:
         return _enum_sensor_value_template(entity, accessor)
@@ -303,6 +305,31 @@ def _select_value_template(entity: EntityDef, accessor: str) -> str:
     return ("{% set v = " + accessor + " | default(none) %}"
             "{% set m = {" + mapping + "} %}"
             "{% if v in m %}{{ m[v] }}{% endif %}")
+
+
+def _surplus_level_value_template(accessor: str) -> str:
+    """`surplus_level`'s label depends on TWO settings fields, not one.
+
+    `settings.surplusControl` is a binary on/off and by itself can never
+    distinguish less/moderate/full — the level lives in the paired
+    `settings.surplusStandard` (1/2/3), only meaningful while `surplusControl`
+    is 1 (`docs/SETTINGS_SCHEMA.md` Part 2). See
+    `ha/entities/selects.py::FEEDER_SELECTS` for why this is special-cased by
+    key rather than going through `_select_value_template`'s single-accessor
+    path — every other select entity maps cleanly from one device field.
+
+    Renders nothing (leaves HA's last known state alone) when `surplusControl`
+    is 1 but `surplusStandard` hasn't been reported with a recognized value
+    yet, same "unmapped renders nothing" convention as `_select_value_template`.
+    """
+    standard_accessor = accessor.rsplit(".", 1)[0] + ".surplusStandard"
+    return ("{% set control = " + accessor + " | default(0) %}"
+            "{% set standard = " + standard_accessor + " | default(none) %}"
+            "{% if control == 0 %}disabled"
+            "{% elif standard == 1 %}less"
+            "{% elif standard == 2 %}moderate"
+            "{% elif standard == 3 %}full"
+            "{% endif %}")
 
 
 def _enum_sensor_value_template(entity: EntityDef, accessor: str) -> str:

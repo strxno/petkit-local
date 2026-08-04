@@ -2134,8 +2134,14 @@ async function loadProvision() {
   const srv = document.getElementById('p-server');
   if (!srv.value) srv.value = PROV_INFO.api_url || '';
   const tz = document.getElementById('p-tz');
+  // Prefer the account offset learned from the real cloud (via a proxied
+  // device); fall back to the browser only when nothing has been adopted yet.
+  const defaultTz =
+    typeof PROV_INFO.timezone === 'number'
+      ? PROV_INFO.timezone
+      : -new Date().getTimezoneOffset() / 60;
   // Only fill it once, so re-opening the tab does not discard a chosen value.
-  if (tz && !tz.options.length) tz.innerHTML = tzOptions(-new Date().getTimezoneOffset() / 60);
+  if (tz && !tz.options.length) tz.innerHTML = tzOptions(defaultTz);
   const w = document.getElementById('provWarn');
   const btn = document.getElementById('p-btn');
   const hasBt = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
@@ -2625,15 +2631,23 @@ async function doProvision() {
     // "ssid:%s pwd:%s hide:%d locale:%s timezone:%f" at provisioning time and
     // stores the result in g_config_timezone — this payload is the only path
     // that sets it. Hours east of UTC, the same unit the device reports back as
-    // "&locale=%s&timezone=%.1f". The picker above chooses it; the browser's
-    // own offset is only the fallback, since the phone provisioning a device is
-    // not always in the same timezone as the device.
+    // "&locale=%s&timezone=%.1f".
+    //
+    // `locale` is an IANA zone name on the real cloud (`Europe/Stockholm`),
+    // NOT a BCP-47 language tag. Prefer the value adopted from a proxied
+    // signup/device_info; fall back to the browser's resolved zone id. Never
+    // `navigator.language` — that produced `en-US` on hardware that expected
+    // `Europe/Oslo`.
     //
     // Only takes effect at provisioning: an already-paired device keeps
     // whatever it was given (or wasn't) until it is provisioned again.
     const tzEl = document.getElementById('p-tz');
     const timezone =
-      tzEl && tzEl.value !== '' ? Number(tzEl.value) : -new Date().getTimezoneOffset() / 60;
+      tzEl && tzEl.value !== ''
+        ? Number(tzEl.value)
+        : typeof PROV_INFO.timezone === 'number'
+          ? PROV_INFO.timezone
+          : -new Date().getTimezoneOffset() / 60;
     // `locale` is a TIME ZONE NAME, not a language. PetKit's own app fills it
     // with `TimeZone.getDefault().getID()` — "Europe/Amsterdam", "America/
     // New_York" — right beside the numeric offset, and the captured signup body
@@ -2641,19 +2655,32 @@ async function doProvision() {
     // Amsterdam`. This used to send `navigator.language`, so a device was told
     // its zone was named "en-US".
     //
-    // From the browser, which is the same source the phone uses. The picker
-    // above cannot supply it: it offers UTC offsets, and an offset names no
-    // single zone — half of UTC+01:00 is Berlin and half is Lagos. The two
-    // halves can therefore disagree when somebody overrides the offset by hand,
-    // and that is the right way round: the number is what the device runs its
-    // clock on, the name is a label it stores and echoes back.
-    const zoneName = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    // Prefer the value adopted from a proxied signup/device_info — the real
+    // PetKit account, which can differ from wherever the phone doing the
+    // provisioning happens to be. Falls back to the browser's own resolved
+    // zone (the same source the phone uses) when nothing has been adopted yet.
+    // The picker above cannot supply it either way: it offers UTC offsets, and
+    // an offset names no single zone — half of UTC+01:00 is Berlin and half is
+    // Lagos. The offset and the name can therefore disagree when somebody
+    // overrides the offset by hand, and that is the right way round: the
+    // number is what the device runs its clock on, the name is a label it
+    // stores and echoes back.
+    const browserZone =
+      (typeof Intl !== 'undefined' &&
+        Intl.DateTimeFormat &&
+        Intl.DateTimeFormat().resolvedOptions().timeZone) ||
+      '';
+    const locale = PROV_INFO.locale || browserZone || '';
     // Everything below is the app's key-151 payload, field for field
     // (`BleDeviceBindProgressPresenter.proceedNextStep`, PetKit 13.8.1):
     // `hide` is the constant 1 rather than anything about the network, and the
     // offset goes out as a string of hours. The app also sends `server` on the
     // BLUFI path and explicitly nulls it on the other one; ours is already in
     // `apiServers`, and no firmware here reads `server` at all.
+    // `ipServers` mirrors `apiServers` and `hide:1` matches the official app —
+    // both present in the only 151 payload confirmed to provision an Ingenic
+    // device (upstream issue #9). Timezone goes out as the one-decimal string
+    // the device echoes back as "&timezone=%.1f", rather than a bare number.
     const cfg = {
       ssid,
       pwd,
@@ -2661,7 +2688,7 @@ async function doProvision() {
         ssid,
         pwd,
         hide: 1,
-        locale: zoneName,
+        locale,
         timezone: timezone.toFixed(1),
         apiServers: [server],
         ipServers: [server],

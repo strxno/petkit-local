@@ -65,6 +65,27 @@ def test_device_info_capacity_mirrors_enabled_capabilities():
     assert names == {"fullVideo", "eventImage", "highLight"}
 
 
+def test_feeder_and_fountain_cameras_get_cvr_capacity():
+    """CVR (`cloud_cvr_start`) is gated on capacity[].indate for fullVideo.
+    Only litter cameras used to receive this block — D4SH/W7H got none, so
+    recording never armed. Same far-future indate STS already uses."""
+    far = 4102444800
+    for codename in ("d4sh", "w7h", "d4h"):
+        d = Device(device_type=codename, petkit_id=1, serial_number="SN")
+        info = d.to_device_info()["result"]
+        assert "capacity" in info, codename
+        by_name = {c["name"]: c for c in info["capacity"]}
+        assert by_name["fullVideo"]["indate"] == far
+        assert info["cloudProduct"]["workIndate"] == far
+        # Litter-only tips stay off camera feeders/fountains.
+        assert "sprayDays" not in info
+
+
+def test_non_camera_still_has_no_capacity():
+    d = Device(device_type="t3", petkit_id=1, serial_number="SN")
+    assert "capacity" not in d.to_device_info()["result"]
+
+
 def test_supports_ai_seeds_from_the_codename_list():
     assert Device(device_type="t5", petkit_id=1).supports_ai is True
     assert Device(device_type="t6", petkit_id=1).supports_ai is True

@@ -13,6 +13,7 @@ report a new one upward.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import urllib.parse
 from collections.abc import Iterator
@@ -96,6 +97,44 @@ def normalize_mac(mac: str) -> str:
     if len(cleaned) != 12 or any(c not in "0123456789ABCDEF" for c in cleaned):
         return ""
     return cleaned
+
+
+#: `pk_schmg_parse_ble_dev_list` (D4SH `ctrl` @ 0x004598ac, T6 `ctrl_t6` @
+#: 0x0046d954 — byte-identical, same `ble_relay_network.c` source, confirmed
+#: by embedded debug strings) rejects the WHOLE response before any JSON
+#: parsing if the raw serialized body is under 0x28 (40) bytes: logs `ble list
+#: len too short`, returns, and the relay list update is silently dropped —
+#: not a crash, but the same silent no-op an omitted `list` key produces, just
+#: one gate further into the function. `{"list": [], "nextTick": 3600}` is 38
+#: bytes under the compact separators `mqtt/bridge.py::_dumps` uses — under
+#: the gate. 48 leaves margin: landing exactly on 40 means the next incidental
+#: change (`nextTick` losing a digit, a shorter field) silently regresses back
+#: under the gate with nothing to catch it.
+MIN_BLE_REPLY_BYTES = 48
+
+
+def build_ble_device_result(ble_list: list[dict[str, Any]]) -> dict[str, Any]:
+    """The `result` object for `dev_ble_device`, padded past the firmware's length gate.
+
+    HTTP (`http/handlers/ble_device.py`, aiohttp's default spaced `json.dumps`)
+    and MQTT (`mqtt/bridge.py::_dumps`, compact separators) do not serialize the
+    same dict to the same byte count, and only one of them clears
+    `MIN_BLE_REPLY_BYTES` by accident of its separators. Both transports go
+    through this one function instead of each depending on its own serializer's
+    whitespace habits — the two had already drifted once (see the git history
+    of this endpoint) from being written independently.
+
+    The padding lands in an explicit `_reserved` key rather than inflating
+    `nextTick` or similar: `pk_schmg_parse_ble_dev_list` only ever does
+    targeted `cJSON_GetObjectItem(result, "list"/"nextTick")` lookups — the
+    same pattern every other endpoint traced this session follows — so an
+    unrecognized key is silently ignored, never rejected. That makes an
+    explicit filler field a legitimate pad, not a hack.
+    """
+    result: dict[str, Any] = {"list": ble_list, "nextTick": 3600}
+    while len(json.dumps({"result": result}, separators=(",", ":")).encode("utf-8")) < MIN_BLE_REPLY_BYTES:
+        result["_reserved"] = result.get("_reserved", "") + "x"
+    return result
 
 
 @dataclass

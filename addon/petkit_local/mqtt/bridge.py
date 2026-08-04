@@ -27,7 +27,7 @@ import time
 from typing import TYPE_CHECKING, Any, AsyncIterable
 
 from petkit_local.devices.ble import (
-    BLEDevice, _iter_ble_frames, ble_command_frame, parser_for,
+    BLEDevice, _iter_ble_frames, ble_command_frame, build_ble_device_result, parser_for,
 )
 from petkit_local.devices.registry import DeviceRegistry, get_setting_fields
 from petkit_local.events import codes
@@ -720,19 +720,17 @@ class MQTTBridge:
             feed = device.config.get("feed_schedule")
             return {"result": feed} if feed is not None else None
         if data_type == "dev_ble_device":
-            # Deliberately identical to `http/handlers/ble_device.py`, including
-            # OMITTING `list` when nothing is paired rather than sending an
-            # empty array. The two answer the same question and had drifted:
-            # this one always sent `list`, its HTTP twin never does. See the
-            # note in `http/middleware.py` for what the firmware makes of an
-            # empty array.
+            # Same shape as `http/handlers/ble_device.py`: always include `list`,
+            # empty when nothing is paired. Omitting it made the firmware log
+            # "ble list len too short"; PetKit's cloud sends `list: []` routinely.
+            # Goes through `build_ble_device_result` because THIS transport's
+            # compact separators land under the firmware's byte-length gate on
+            # their own — see that function's docstring.
             lst = []
             if self._ble_registry:
                 for b in self._ble_registry.non_k3_for_parent(device.petkit_id):
                     lst.append(b.to_ble_list_entry())
-            if not lst:
-                return {"result": {}}
-            return {"result": {"list": lst, "nextTick": 3600}}
+            return {"result": build_ble_device_result(lst)}
         return None
 
     def _update_linked_k3(self, device: Device, params: dict) -> BLEDevice | None:

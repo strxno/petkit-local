@@ -260,6 +260,31 @@ def test_sts_is_captured_when_replaced_too():
     assert result.captured["oss_sts"] == STS["result"]["capability"]
 
 
+def test_cvr_capacity_window_is_replaced_not_confused_with_sts():
+    """dev_device_info's capacity[] shares the key name with STS but carries
+    name/workTime/indate. An expired PetKit billing window must not pass
+    through, and must not be overwritten with ParUrl entries either."""
+    expired = {"result": {
+        "capacity": [
+            {"name": "fullVideo", "workTime": 1784895855, "indate": 1785535199},
+            {"name": "eventImage", "workTime": 1784895855, "indate": 1785535199},
+        ],
+        "cloudProduct": {
+            "serviceId": 1, "name": "Pro", "workTime": 1784895855,
+            "workIndate": 1785535199, "chargeType": "YEAR", "subscribe": 1,
+        },
+    }}
+    body, result = _run(expired, endpoint="/6/d4sh/dev_device_info",
+                        policy=_policy(device=Device(device_type="d4sh",
+                                                      petkit_id=1, serial_number="SN")))
+    caps = body["result"]["capacity"]
+    assert all(c["indate"] == 4102444800 for c in caps)
+    assert {c["name"] for c in caps} >= {"fullVideo"}
+    assert "primaryParUrl" not in caps[0]
+    assert body["result"]["cloudProduct"]["workIndate"] == 4102444800
+    assert any("CVR capacity" in (r.note or "") for r in result.records)
+
+
 # --- secret -----------------------------------------------------------------
 
 def test_the_signup_secret_is_adopted_not_replaced():
@@ -291,22 +316,26 @@ def test_a_foreign_device_id_is_still_forced_to_ours():
     assert [r.rule for r in result.records] == [RULE_SECRET]
 
 
-def test_upstream_cannot_overwrite_the_devices_timezone():
-    """PetKit's account-side timezone rode in on dev_device_info and the device
-    adopted it — `0.0`/`Etc/UTC` over our `2.0`, which is what burns UTC into
-    video watermarks. The device has no timezone of its own to fall back on."""
+def test_upstream_timezone_is_adopted_not_overwritten():
+    """PetKit's account-side timezone rides in on dev_device_info. We used to
+    replace it with the container's empty/UTC values; that burned the wrong
+    offset into devices whose cloud account was already correct
+    (`Europe/Stockholm` / `2.0` on the reference install)."""
     device = _device()
-    device.config["timezone"] = 2.0
-    device.config["locale"] = "Europe/Warsaw"
+    device.config["timezone"] = 0.0
+    device.config["locale"] = ""
 
     body, result = _run({"result": {"id": device.petkit_id, "secret": "abc",
-                                    "timezone": 0.0, "locale": "Etc/UTC"}},
+                                    "timezone": 2.0, "locale": "Europe/Stockholm"}},
                         endpoint="/6/t5/dev_device_info", policy=_policy(device=device))
 
+    # Pass through unchanged.
     assert body["result"]["timezone"] == 2.0
-    assert body["result"]["locale"] == "Europe/Warsaw"
-    assert [r.rule for r in result.records] == [RULE_LOCALE, RULE_LOCALE]
-    # routine, not an attempt — it fires on every poll
+    assert body["result"]["locale"] == "Europe/Stockholm"
+    assert result.captured["time_settings"] == {
+        "timezone": 2.0, "locale": "Europe/Stockholm",
+    }
+    assert [r.rule for r in result.records] == [RULE_LOCALE]
     assert result.blocked == []
 
 
@@ -316,6 +345,7 @@ def test_the_locale_rule_never_adds_a_field_that_was_absent():
                         endpoint="/6/t5/dev_signup", policy=_policy(device=device))
     assert "timezone" not in body["result"]
     assert "locale" not in body["result"]
+    assert "time_settings" not in result.captured
     assert result.records == []
 
 

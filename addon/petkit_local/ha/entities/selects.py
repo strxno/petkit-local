@@ -29,10 +29,14 @@ FEEDER_SELECTS = [
     # because `to_device_info` serves seeded settings back to the device and a
     # made-up value would change the owner's setting.
     #
-    # KNOWN INCOMPLETE: the reference integration writes the PAIR
-    # {"surplusControl": 1, "surplusStandard": <level>} and this sends only the
-    # first half, so the level probably does not take effect. Fixing it needs a
-    # feeder capture showing what the device expects.
+    # A PAIR, decompile-confirmed (`docs/SETTINGS_SCHEMA.md` Part 2):
+    # disabled=surplusControl:0; less/moderate/full=surplusControl:1 +
+    # surplusStandard:1/2/3. `surplusControl` alone is binary and can never by
+    # itself distinguish less/moderate/full — both the write AND the displayed
+    # state need both fields, so this entity is special-cased by `key` in
+    # `ha/discovery.py::_value_template` (read) and
+    # `ha/commands.py::handle_ha_command` (write) rather than going through the
+    # generic single-field select path every other entity here uses.
     EntityDef(component="select", key="surplus_level", name="Surplus Level",
               value_path="settings.surplusControl", icon="mdi:bowl-mix",
               options=["disabled", "less", "moderate", "full"]),

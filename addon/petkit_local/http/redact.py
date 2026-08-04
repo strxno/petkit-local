@@ -14,10 +14,11 @@ which is how the heartbeat carries its commands and how the old
 Two very different kinds of rule live here, and the difference is what
 `BLOCKING_RULES` encodes:
 
-* **Routine substitutions** (`server`, `mqtt`, `oss_sts`, `locale`) replace the
-  cloud's address — or the device's own local-time settings — with ours. They
-  fire constantly, on every `dev_serverinfo` and `dev_device_info` poll, and
-  mean nothing except "proxy mode is on". They are logged, not persisted.
+* **Routine substitutions** (`server`, `mqtt`, `oss_sts`) replace the cloud's
+  address with ours. They fire constantly, on every `dev_serverinfo` and
+  `dev_device_info` poll, and mean nothing except "proxy mode is on". They are
+  logged, not persisted. `locale` is an adoption (like `secret`): the account's
+  timezone/locale from upstream is kept and remembered, not overwritten.
 * **Blocked attempts** (`rce`, `ota`, `secret`) mean the upstream tried to run a
   command, push firmware, or re-credential the device. These are rare, and each
   one is persisted (`events/models.py::BlockedAttempt`).
@@ -355,6 +356,7 @@ def _walk_dict(node: dict, path: str, policy: RedactionPolicy,
     node = _match_server(node, path, policy, out)
     node = _match_mqtt(node, path, policy, out)
     node = _match_oss_sts(node, path, policy, out)
+    node = _match_cvr_capacity(node, path, policy, out)
     node = _match_secret(node, path, policy, out)
     node = _match_locale(node, path, policy, out)
 
@@ -584,9 +586,17 @@ def _match_oss_sts(node: dict, path: str, policy: RedactionPolicy,
     Skipped entirely when `media_to_real_oss` is set, which is the toggle that
     lets a device record to PetKit's OSS so the real upload path can be watched.
     The original is captured either way.
+
+    Only the STS shape is matched here (`cycleType` / `primaryParUrl`). The
+    `dev_device_info` subscription list is also keyed `capability[]` but carries
+    `name`/`workTime`/`indate` — that is `_match_cvr_capacity`.
     """
     device = policy.device
-    if device is None or not isinstance(node.get("capability"), list):
+    caps = node.get("capability")
+    if device is None or not isinstance(caps, list) or not caps:
+        return node
+    sample = caps[0] if isinstance(caps[0], dict) else None
+    if sample is None or not ("cycleType" in sample or "primaryParUrl" in sample):
         return node
 
     out.captured["oss_sts"] = node["capability"]
@@ -602,6 +612,51 @@ def _match_oss_sts(node: dict, path: str, policy: RedactionPolicy,
         note="upstream tried to repoint media uploads",
     ))
     return patched
+
+
+def _match_cvr_capacity(node: dict, path: str, policy: RedactionPolicy,
+                        out: RedactionResult) -> dict:
+    """`dev_device_info` `capacity[]` / `cloudProduct` — the CVR subscription window.
+
+    Firmware (`cloud_cvr_start`) only arms continuous recording while now is
+    between each entry's `workTime` and `indate`. An expired PetKit billing
+    window arrives looking like a valid config and silently leaves the upload
+    queue empty. Replace with our standing local window (same far `indate` STS
+    already uses). Shape-gated on `name`+`indate` so the STS `capability[]`
+    (cycleType/ParUrl) is left to `_match_oss_sts`.
+    """
+    device = policy.device
+    if device is None or not device.is_camera:
+        return node
+
+    patched = dict(node)
+    changed = False
+
+    caps = node.get("capacity")
+    if isinstance(caps, list) and caps and isinstance(caps[0], dict) and "indate" in caps[0]:
+        ours = device.to_device_info()["result"].get("capacity") or []
+        patched["capacity"] = ours
+        out.records.append(Redaction(
+            rule=RULE_OSS_STS, path=f"{path}.capacity" if path else "capacity",
+            original=caps, replacement=ours,
+            note="upstream CVR capacity window replaced with local standing window",
+        ))
+        changed = True
+
+    product = node.get("cloudProduct")
+    if isinstance(product, dict) and "workIndate" in product:
+        ours_prod = device.to_device_info()["result"].get("cloudProduct") or {}
+        if ours_prod:
+            patched["cloudProduct"] = ours_prod
+            out.records.append(Redaction(
+                rule=RULE_OSS_STS,
+                path=f"{path}.cloudProduct" if path else "cloudProduct",
+                original=product, replacement=ours_prod,
+                note="upstream cloudProduct window replaced with local standing window",
+            ))
+            changed = True
+
+    return patched if changed else node
 
 
 def _match_secret(node: dict, path: str, policy: RedactionPolicy,
@@ -656,20 +711,22 @@ def _match_secret(node: dict, path: str, policy: RedactionPolicy,
 
 def _match_locale(node: dict, path: str, policy: RedactionPolicy,
                   out: RedactionResult) -> dict:
-    """`timezone` / `locale` for OUR device — keep ours, not PetKit's.
+    """`timezone` / `locale` for OUR device — adopt PetKit's, do not invent.
 
-    Both fields ride along on `dev_signup` and `dev_device_info`, which
-    `_match_secret` deliberately passes through whole. Proxied unchanged, the
-    device adopts the account's cloud-side values — on the reference install
-    that meant `timezone: 0.0, locale: "Etc/UTC"` replacing our `2.0`, visible
-    in its state reports minutes later. The device has no timezone of its own
-    beyond what it is told (`ctrl` takes one from BLE provisioning only), and a
-    wrong one is burned into video watermarks.
+    Both fields ride along on `dev_signup` and `dev_device_info`. The real cloud
+    sends the account's IANA zone as `locale` (e.g. `Europe/Stockholm`) and a
+    one-decimal offset as `timezone` (e.g. `2.0`). BLE provisioning uses the
+    same pair.
 
-    Same shape as `_match_server`: only keys ALREADY PRESENT are overwritten, so
-    this never adds a field to a body that had none. Routine, so it is not in
-    `BLOCKING_RULES` — `dev_device_info` is polled often and a row per poll
-    would bury the attempts that matter.
+    This used to overwrite those with whatever the container happened to think
+    (`0.0` / `""` on a UTC box), which burned the wrong offset into devices that
+    had a correct cloud account. Captured on the reference install: upstream
+    `Europe/Stockholm`/`2.0` was replaced with empty/`0.0` on every poll.
+
+    Same shape as `_match_secret`: capture + pass through. Adoption into
+    `device.config` happens in `_remember_upstream_credentials`, so a later
+    local `to_signup` / the provision form can reuse what the cloud already
+    decided. Nested accessory blocks are left alone.
     """
     device = policy.device
     if device is None:
@@ -683,18 +740,29 @@ def _match_locale(node: dict, path: str, policy: RedactionPolicy,
     if not about_us:
         return node
 
-    ours = {"timezone": device.timezone_offset, "locale": device.config.get("locale", "")}
-    patched = dict(node)
-    for key, value in ours.items():
-        if key not in node or node[key] == value:
-            continue
-        out.records.append(Redaction(
-            rule=RULE_LOCALE, path=f"{path}.{key}" if path else key,
-            original=node[key], replacement=value,
-            note="upstream would overwrite the device's local time settings",
-        ))
-        patched[key] = value
-    return patched
+    adopted: dict[str, Any] = {}
+    if "timezone" in node:
+        from petkit_local.utils.coerce import to_float
+        tz = to_float(node.get("timezone"), None)
+        if tz is not None:
+            adopted["timezone"] = tz
+    locale = node.get("locale")
+    if isinstance(locale, str) and locale:
+        adopted["locale"] = locale
+
+    if adopted:
+        # Merge with any earlier walk hit on the same body so a signup that
+        # carries both fields in one object is remembered as one pair.
+        prev = out.captured.get("time_settings") or {}
+        out.captured["time_settings"] = {**prev, **adopted}
+        if any(device.config.get(k) != v for k, v in adopted.items()):
+            out.records.append(Redaction(
+                rule=RULE_LOCALE, path=path or "result",
+                original={k: device.config.get(k) for k in adopted},
+                replacement=adopted,
+                note="adopted the account timezone/locale from upstream",
+            ))
+    return node
 
 
 # --- helpers ----------------------------------------------------------------

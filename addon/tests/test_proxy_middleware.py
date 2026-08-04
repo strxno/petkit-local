@@ -15,6 +15,7 @@ import json
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from petkit_local.devices.ble import MIN_BLE_REPLY_BYTES
 from petkit_local.devices.registry import DeviceRegistry
 from petkit_local.events.store import EventStore
 from petkit_local.http.proxy import close_proxy_session
@@ -865,11 +866,10 @@ async def test_the_real_api_secret_is_adopted_and_then_served_locally():
 
 
 async def test_the_ble_list_is_always_ours():
-    """An empty `list: []` from the cloud is fatal on real hardware: the
-    firmware's `pk_schmg_parse_ble_dev_list` dereferences null on it and aborts
-    the boot chain, so the device never starts heartbeating while `ctrl` keeps
-    running. Our reply omits `list` entirely when nothing is paired, which skips
-    that parser. The upstream reply is still forwarded and recorded."""
+    """An empty `list: []` from the cloud used to be feared fatal; PetKit's own
+    cloud sends it routinely. We still answer locally (LOCAL_ONLY) so a taken-
+    over device is not told to drop accessories paired here. Our reply matches
+    the cloud empty shape: `list: []` with nextTick."""
     hits = []
 
     async def cloud(request):
@@ -884,13 +884,51 @@ async def test_the_ble_list_is_always_ours():
         client.app["config"]["proxy_mode"] = True
 
         r = await client.get("/6/t5/dev_ble_device", headers=HDR)
-        body = await r.json()
+        raw = await r.read()
+        body = json.loads(raw)
 
-        assert "list" not in body["result"], "an empty list bricks the boot chain"
+        assert body["result"]["list"] == []
+        assert body["result"]["nextTick"] == 3600
+        assert len(raw) >= MIN_BLE_REPLY_BYTES, "padded past the firmware's length gate"
         # Still observed — proxy mode's whole purpose.
         assert hits == ["/6/t5/dev_ble_device"]
         entry = [e for e in hub.recent() if e["kind"] == "http"][-1]
         assert '"list": []' in entry["detail"]["proxy"]["upstream_body"]
+    finally:
+        await close_proxy_session(client.app)
+        await client.close()
+        await up.close()
+
+
+async def test_media_file_info_is_never_forwarded():
+    """`dev_upload_file_info_v2` names objects in OUR bucket with full URLs.
+    Forwarding it hands PetKit the LAN layout STS redaction exists to hide;
+    upstream also has nothing useful to say (error 1). Unlike ble_device, do
+    not dial at all."""
+    hits = []
+
+    async def cloud(request):
+        hits.append(request.path)
+        body = await request.read()
+        hits.append(body.decode())
+        return web.json_response({"error": {"code": 1, "msg": "系统繁忙"}})
+
+    up, base = await _cloud(cloud)
+    client, _ = await _device_app(_config(proxy_upstream=base))
+    try:
+        await _register(client)
+        client.app["config"]["proxy_mode"] = True
+
+        infos = [{"fileId": "f1",
+                  "fileUrl": "https://192.0.2.199:9000/t5/100/eventImage/f1",
+                  "cycleType": "eventImage", "eventId": "r1"}]
+        from urllib.parse import quote
+        body = "fileInfos=" + quote(json.dumps(infos))
+
+        r = await client.post("/6/t5/dev_upload_file_info_v2", headers=HDR, data=body)
+        assert r.status == 200
+        assert (await r.json())["result"] == "success"
+        assert hits == [], "must not leak our bucket URLs upstream"
     finally:
         await close_proxy_session(client.app)
         await client.close()

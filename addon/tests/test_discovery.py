@@ -138,6 +138,30 @@ def test_select_template_structure_is_balanced_and_complete():
             assert f"'{label}'" in tpl, f"{dtype}/{key}: {label} missing from template"
 
 
+def test_surplus_level_state_reads_both_paired_fields():
+    """`surplusControl` alone is binary (0/1) and can never by itself render
+    less/moderate/full — the level is `settings.surplusStandard`
+    (docs/SETTINGS_SCHEMA.md Part 2), only meaningful while `surplusControl`
+    is 1. The generic single-accessor `_select_value_template` path a select
+    normally uses can't express that, hence the `surplus_level`-keyed special
+    case in `_value_template` (`_surplus_level_value_template`)."""
+    from petkit_local.ha.discovery import _value_template
+    d = Device(device_type="d4sh", petkit_id=1, serial_number="SN")
+    sel = next(e for e in get_entities_for_device(d) if e.key == "surplus_level")
+    tpl = _value_template(sel)
+
+    assert tpl.count("{%") == tpl.count("%}")
+    assert _render(tpl, {"settings": {"surplusControl": 0, "surplusStandard": 3}}) == "disabled"
+    assert _render(tpl, {"settings": {"surplusControl": 1, "surplusStandard": 1}}) == "less"
+    assert _render(tpl, {"settings": {"surplusControl": 1, "surplusStandard": 2}}) == "moderate"
+    assert _render(tpl, {"settings": {"surplusControl": 1, "surplusStandard": 3}}) == "full"
+    # surplusControl=1 with no recognized standard yet: nothing, not a crash
+    # or an invalid-option log — same "unmapped renders nothing" convention
+    # as every other select.
+    assert _render(tpl, {"settings": {"surplusControl": 1}}) == ""
+    assert _render(tpl, {"settings": {}}) == "disabled"  # both default missing to 0/none
+
+
 def test_text_entity_respects_ha_max_length_limit():
     """HA's MQTT text platform rejects the entire discovery message when
     `max` > 255, so the schedule entities never appeared at all."""

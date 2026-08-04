@@ -528,6 +528,41 @@ async def test_multi_config_json_strings():
         await client.close()
 
 
+async def test_feeder_multi_config_includes_always_on_camera_schedule():
+    """D4SH camera timer walks cameraMultiNew → cameraRangeTable. Empty
+    rangeSub for every weekday leaves media logging 'camera not enable' even
+    when settings.camera is 1.
+
+    `cameraMultiRange` and `cameraMultiNew` are two DIFFERENT fields with
+    DIFFERENT shapes on D4SH specifically — unlike T5/T6/W7H, where
+    `cameraMultiRange` alone is the Format-B gating field (see
+    `docs/SETTINGS_SCHEMA.md` Part 1). `cameraMultiRange` here is D4SH's
+    legacy Format-A flat-range slot table, parsed independently of the
+    Format-B `cameraMultiNew` that actually gates CVR."""
+    from petkit_local.devices.base import Device
+    d = Device(device_type="d4sh", petkit_id=1, serial_number="SN")
+    res = d.to_multi_config()["result"]
+    always_on = [{"enable": 1, "rpt": "1,2,3,4,5,6,7", "time": [[0, 1440]]}]
+    assert json.loads(res["cameraMultiNew"]) == {"cameraMultiNew": always_on}
+    # Format A here, not Format B — a bare [[0,1440]] is correct for this field
+    # on D4SH, and would be WRONG (silently empty) on T5/T6/W7H.
+    assert json.loads(res["cameraMultiRange"]) == {"cameraMultiRange": [[0, 1440]]}
+    assert json.loads(res["detectMultiRange"]) == {"detectMultiRange": [[0, 1440]]}
+
+
+async def test_fountain_multi_config_has_no_bogus_cameraMultiNew():
+    """W7H has no `cameraMultiNew` field at all (docs/SETTINGS_SCHEMA.md Part
+    1) — `cameraMultiRange` alone is the Format-B gating field there, same
+    pattern as T5/T6. Sending an extra `cameraMultiNew` key isn't harmful
+    (unrecognized keys are silently ignored) but isn't a real field either."""
+    from petkit_local.devices.base import Device
+    d = Device(device_type="w7h", petkit_id=1, serial_number="SN")
+    res = d.to_multi_config()["result"]
+    always_on = [{"enable": 1, "rpt": "1,2,3,4,5,6,7", "time": [[0, 1440]]}]
+    assert json.loads(res["cameraMultiRange"]) == {"cameraMultiRange": always_on}
+    assert "cameraMultiNew" not in res
+
+
 async def test_ota_check_is_an_empty_object():
     reg = DeviceRegistry()
     client = await _client(reg)

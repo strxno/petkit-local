@@ -45,6 +45,17 @@ PROPERTY_SET_SUFFIX = "property/set"
 # control point, and the device picks the change up on its next poll.
 CAPABILITY_VALUE_PREFIX = "capabilities."
 
+# `surplus_level` (ha/entities/selects.py::FEEDER_SELECTS) writes a PAIR,
+# decompile-confirmed (docs/SETTINGS_SCHEMA.md Part 2): `surplusControl` alone
+# is binary and can't carry less/moderate/full by itself. Keyed by option
+# LABEL, not index, so it survives the options list being reordered.
+_SURPLUS_LEVEL_FIELDS: dict[str, dict[str, int]] = {
+    "disabled": {"surplusControl": 0},
+    "less": {"surplusControl": 1, "surplusStandard": 1},
+    "moderate": {"surplusControl": 1, "surplusStandard": 2},
+    "full": {"surplusControl": 1, "surplusStandard": 3},
+}
+
 
 def _envelope(method: str, params: dict, ms_id: bool = False) -> dict[str, Any]:
     """Wrap `params` in the Aliyun IoT service envelope.
@@ -314,6 +325,17 @@ def handle_ha_command(device: Device, entity: EntityDef, payload: str) -> Comman
         device.config[key] = parsed
         log.info("Set config[%s] for device %d", key, device.petkit_id)
         return None
+
+    if comp == "select" and entity.key == "surplus_level":
+        fields = _SURPLUS_LEVEL_FIELDS.get(str(payload).strip().lower())
+        if fields is None:
+            log.warning("Unknown surplus level payload %r for device %d",
+                        payload, device.petkit_id)
+            return None
+        device.config.setdefault("settings", {}).update(fields)
+        log.info("Setting surplus level %s for device %d (optimistic + MQTT)",
+                  fields, device.petkit_id)
+        return (PROPERTY_SET_SUFFIX, make_mqtt_property_set(fields))
 
     if comp not in ("switch", "number", "select"):
         return None

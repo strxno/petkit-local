@@ -24,23 +24,21 @@ FEEDER_NUMBERS = [
 #: parsers (`_parse_litter_camera` is documented as "the ESP32 litter set
 #: PLUS the camera, spray and package fields").
 #:
-#: THE VOLUME RANGE IS UNVERIFIED for a litter box, and 0-9 should not be read
-#: as evidence. The field itself is real — PetKit's own cloud sends `volume` in
-#: `dev_device_info` — but in all 508 captured replies it was `1` and never
-#: anything else, so no capture bounds it. 0-9 comes from localkit's validator
-#: for the YumShare Solo, a FEEDER (`PetkitYumshareSolo.php`, whose own picker
-#: offers 1-9, not 0-9); its litter-box model declares no volume at all. The
-#: panel shows the range so the bound is at least visible to whoever hits it.
+#: Range 1-9, decompile-confirmed on D4SH/T6/W7H (`docs/SETTINGS_SCHEMA.md`
+#: Part 2, `parse_compare_device_resinfo`) — not the 0-9 this used to carry.
+#: 0 was never independently observed (508 captured replies all showed `1`)
+#: and traced back to localkit's validator for the YumShare Solo, a
+#: DIFFERENT, non-camera feeder whose own picker actually offers 1-9.
 LITTER_CAMERA_NUMBERS = [
     EntityDef(component="number", key="volume", name="Volume",
               value_path="settings.volume", icon="mdi:volume-high",
-              min_value=0, max_value=9, step=1),
+              min_value=1, max_value=9, step=1),
 ]
 
 FEEDER_CAMERA_NUMBERS = [
     EntityDef(component="number", key="volume", name="Volume",
               value_path="settings.volume", icon="mdi:volume-high",
-              min_value=0, max_value=9, step=1),
+              min_value=1, max_value=9, step=1),
 ]
 
 FOUNTAIN_NUMBERS = [

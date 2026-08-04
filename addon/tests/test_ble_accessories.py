@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from petkit_local.devices.ble import BLERegistry, normalize_mac
+from petkit_local.devices.ble import MIN_BLE_REPLY_BYTES, BLERegistry, normalize_mac
 from petkit_local.devices.registry import DeviceRegistry
 from petkit_local.http.server import create_app
 from petkit_local.mqtt.bridge import MQTTBridge
@@ -194,23 +194,34 @@ async def test_the_device_is_told_to_scan_for_a_paired_accessory():
         await c.close()
 
 
-async def test_nothing_paired_omits_the_list_key_entirely():
-    """Both transports must agree on this, and they had drifted — the MQTT twin
-    always sent `list`, empty or not."""
+async def test_nothing_paired_sends_an_empty_list():
+    """Match PetKit's cloud: `list: []` with nextTick, not a bare `{}`.
+    Omitting `list` logs `ble list len too short` on D4SH — and so does a
+    too-short *present* list: `{"list":[],"nextTick":3600}` compact-serializes
+    to 38 bytes, under the firmware's 40-byte gate, so the reply needs padding
+    past `MIN_BLE_REPLY_BYTES` (see `devices/ble.py::build_ble_device_result`)."""
     reg = DeviceRegistry()
     reg.get_or_create(petkit_id=10, device_type="t5", serial_number="SN10")
     app = create_app(reg, dict(DEVICE_CONFIG))
     app["ble_registry"] = BLERegistry()
     c = await _client(app)
     try:
-        http_body = await (await c.get("/6/t5/dev_ble_device", headers=HDR)).json()
-        assert "list" not in http_body["result"]
+        resp = await c.get("/6/t5/dev_ble_device", headers=HDR)
+        raw = await resp.read()
+        http_body = json.loads(raw)
+        assert http_body["result"]["list"] == []
+        assert http_body["result"]["nextTick"] == 3600
+        assert len(raw) >= MIN_BLE_REPLY_BYTES
     finally:
         await c.close()
 
     bridge = MQTTBridge(reg, None, BLERegistry())
     mqtt_body = bridge._user_get_payload(reg.get(10), "dev_ble_device")
     assert mqtt_body == http_body, "the two transports answer the same question differently"
+    mqtt_raw = json.dumps(mqtt_body, separators=(",", ":"))
+    assert len(mqtt_raw.encode()) >= MIN_BLE_REPLY_BYTES, (
+        "MQTT's compact separators are the shape that actually risked the gate"
+    )
 
 
 async def test_a_k3_is_never_put_in_the_relay_list():
@@ -225,7 +236,7 @@ async def test_a_k3_is_never_put_in_the_relay_list():
     c = await _client(app)
     try:
         body = await (await c.get("/6/t5/dev_ble_device", headers=HDR)).json()
-        assert "list" not in body["result"]
+        assert body["result"]["list"] == []
     finally:
         await c.close()
 

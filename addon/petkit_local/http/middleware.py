@@ -66,9 +66,9 @@ API_PREFIX = "/6/"
 #: cloud answers `{"result":{"list":[],"nextTick":3600}}` to a device with no
 #: accessories — 234 times in one session — so every unaccessorised PetKit
 #: device in the world receives that payload routinely. The ERR line is real,
-#: but a logged parse error is not the same as an aborted boot. Both our
-#: handlers still omit `list` when nothing is paired, because it costs nothing
-#: and the firmware demonstrably skips the parser entirely that way.
+#: but a logged parse error is not the same as an aborted boot. We match the
+#: cloud shape (empty `list`, not an omitted key): a bare `{"result":{}}` is
+#: under the firmware's minimum length and logs `ble list len too short`.
 #:
 #: This set is for answers that would BREAK the device, not for answers that
 #: are merely inconvenient to us. `dev_discern_pic` is deliberately absent: the
@@ -559,15 +559,37 @@ def _remember_upstream_credentials(request: web.Request, device, exchange) -> No
       reverts to a secret the cloud rejects.
     * The **Aliyun MQTT credentials** from `dev_iot_device_info`, for
       `mqtt/upstream.py`. Kept in their own file, not on the device.
+
+    And, when present on the same bodies, the account **timezone / locale**
+    (IANA name + offset). Those are what BLE provisioning should send, and what
+    `to_signup` echoes locally once learned — see `_match_locale`.
     """
     api_secret = exchange.captured.get("api_secret")
+    registry = request.app.get("registry")
+    dirty = False
     if api_secret and api_secret != device.api_secret:
         device.api_secret = api_secret
-        registry = request.app.get("registry")
-        if registry is not None:
-            registry.mark_dirty()
+        dirty = True
         log.info("Adopted the real PetKit API secret for device %d — its requests "
                  "will now verify upstream", device.petkit_id)
+
+    time_settings = exchange.captured.get("time_settings") or {}
+    if time_settings:
+        changed = False
+        if "timezone" in time_settings and device.config.get("timezone") != time_settings["timezone"]:
+            device.config["timezone"] = time_settings["timezone"]
+            changed = True
+        if "locale" in time_settings and device.config.get("locale") != time_settings["locale"]:
+            device.config["locale"] = time_settings["locale"]
+            changed = True
+        if changed:
+            dirty = True
+            log.info("Adopted cloud time settings for device %d: timezone=%s locale=%s",
+                     device.petkit_id, device.config.get("timezone"),
+                     device.config.get("locale"))
+
+    if dirty and registry is not None:
+        registry.mark_dirty()
 
     creds = exchange.captured.get("mqtt")
     store = request.app.get("proxy_upstream_creds")

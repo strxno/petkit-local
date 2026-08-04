@@ -20,6 +20,12 @@ def _litter():
     return d, _settable_index(d)
 
 
+def _feeder():
+    d = Device(device_type="d4sh", petkit_id=1, serial_number="SN")
+    d.config.setdefault("settings", d.default_settings())
+    return d, _settable_index(d)
+
+
 def test_switch_updates_settings_and_returns_mqtt():
     d, idx = _litter()
     res = handle_ha_command(d, idx["auto_work"], "OFF")
@@ -100,6 +106,30 @@ def test_select_explicit_values():
     d, idx = _litter()
     _, payload = handle_ha_command(d, idx["cleaning_interval"], "1h")
     assert payload["params"] == {"autoIntervalMin": 60}
+
+
+def test_surplus_level_writes_the_pair_not_just_control():
+    """`surplusControl` alone is binary and can't carry a level by itself
+    (docs/SETTINGS_SCHEMA.md Part 2) — the generic single-field select path
+    used to send only `{"surplusControl": 1}` for every non-disabled choice,
+    so less/moderate/full were indistinguishable on the wire."""
+    d, idx = _feeder()
+    _, payload = handle_ha_command(d, idx["surplus_level"], "moderate")
+    assert payload["params"] == {"surplusControl": 1, "surplusStandard": 2}
+    assert d.config["settings"]["surplusControl"] == 1
+    assert d.config["settings"]["surplusStandard"] == 2
+
+    _, payload = handle_ha_command(d, idx["surplus_level"], "disabled")
+    assert payload["params"] == {"surplusControl": 0}
+    assert d.config["settings"]["surplusControl"] == 0
+    # Previous level stays — only meaningful while surplusControl is 1.
+    assert d.config["settings"]["surplusStandard"] == 2
+
+
+def test_surplus_level_rejects_an_unknown_label():
+    d, idx = _feeder()
+    assert handle_ha_command(d, idx["surplus_level"], "extreme") is None
+    assert "surplusControl" not in d.config["settings"]
 
 
 def test_button_returns_mqtt_service_envelope():
