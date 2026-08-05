@@ -656,7 +656,6 @@ async def api_info(request: web.Request) -> web.Response:
     reg = request.app["registry"]
     cert = cfg.get("cert_path", "")
     ha_pub = request.app.get("ha_publisher")
-    time_settings = _provision_time_settings(reg)
     return web.json_response({
         # The hash of the assets THIS process would serve, so the panel can
         # compare it with the one baked into the page it is running from. They
@@ -684,11 +683,6 @@ async def api_info(request: web.Request) -> web.Response:
         # "disabled" rather than "down" when it was switched off deliberately.
         "ha_enabled": ha_pub is not None,
         "device_count": len(reg.all()),
-        # Account timezone/locale for BLE provisioning — preferred from a
-        # device that already learned them via proxy (real cloud), else the
-        # container's own offset with an empty locale.
-        "timezone": time_settings["timezone"],
-        "locale": time_settings["locale"],
         # live-editable runtime settings (reflect the shared device-facing config)
         "settings": _current_settings(request),
         "settings_writable": bool(request.app.get("live_config")),
@@ -709,27 +703,6 @@ async def api_info(request: web.Request) -> web.Response:
         # settles into polling only the heartbeat.
         "upstream": request.app["hub"].upstream_counts(),
     })
-
-
-def _provision_time_settings(reg: DeviceRegistry) -> dict[str, Any]:
-    """Timezone/locale BLE provisioning should send.
-
-    Prefers values already adopted from the real cloud onto any registered
-    device (`Europe/Stockholm` + `2.0` on the reference install). Falls back
-    to the container's current UTC offset with an empty locale — never to
-    `navigator.language`, which is a BCP-47 tag and not what PetKit stores.
-    """
-    from petkit_local.utils.timeutil import local_offset_hours
-
-    for d in reg.all():
-        locale = d.config.get("locale") or ""
-        tz = d.config.get("timezone")
-        if locale or tz is not None:
-            return {
-                "locale": locale,
-                "timezone": float(tz) if tz is not None else local_offset_hours(),
-            }
-    return {"locale": "", "timezone": local_offset_hours()}
 
 
 def _upstream_choices() -> list[dict[str, str | bool]]:

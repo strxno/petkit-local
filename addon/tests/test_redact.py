@@ -316,26 +316,22 @@ def test_a_foreign_device_id_is_still_forced_to_ours():
     assert [r.rule for r in result.records] == [RULE_SECRET]
 
 
-def test_upstream_timezone_is_adopted_not_overwritten():
-    """PetKit's account-side timezone rides in on dev_device_info. We used to
-    replace it with the container's empty/UTC values; that burned the wrong
-    offset into devices whose cloud account was already correct
-    (`Europe/Stockholm` / `2.0` on the reference install)."""
+def test_upstream_cannot_overwrite_the_devices_timezone():
+    """PetKit's account-side timezone rode in on dev_device_info and the device
+    adopted it — `0.0`/`Etc/UTC` over our `2.0`, which is what burns UTC into
+    video watermarks. The device has no timezone of its own to fall back on."""
     device = _device()
-    device.config["timezone"] = 0.0
-    device.config["locale"] = ""
+    device.config["timezone"] = 2.0
+    device.config["locale"] = "Europe/Warsaw"
 
     body, result = _run({"result": {"id": device.petkit_id, "secret": "abc",
-                                    "timezone": 2.0, "locale": "Europe/Stockholm"}},
+                                    "timezone": 0.0, "locale": "Etc/UTC"}},
                         endpoint="/6/t5/dev_device_info", policy=_policy(device=device))
 
-    # Pass through unchanged.
     assert body["result"]["timezone"] == 2.0
-    assert body["result"]["locale"] == "Europe/Stockholm"
-    assert result.captured["time_settings"] == {
-        "timezone": 2.0, "locale": "Europe/Stockholm",
-    }
-    assert [r.rule for r in result.records] == [RULE_LOCALE]
+    assert body["result"]["locale"] == "Europe/Warsaw"
+    assert [r.rule for r in result.records] == [RULE_LOCALE, RULE_LOCALE]
+    # routine, not an attempt — it fires on every poll
     assert result.blocked == []
 
 
@@ -345,7 +341,6 @@ def test_the_locale_rule_never_adds_a_field_that_was_absent():
                         endpoint="/6/t5/dev_signup", policy=_policy(device=device))
     assert "timezone" not in body["result"]
     assert "locale" not in body["result"]
-    assert "time_settings" not in result.captured
     assert result.records == []
 
 

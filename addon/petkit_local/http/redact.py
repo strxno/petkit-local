@@ -17,8 +17,9 @@ Two very different kinds of rule live here, and the difference is what
 * **Routine substitutions** (`server`, `mqtt`, `oss_sts`) replace the cloud's
   address with ours. They fire constantly, on every `dev_serverinfo` and
   `dev_device_info` poll, and mean nothing except "proxy mode is on". They are
-  logged, not persisted. `locale` is an adoption (like `secret`): the account's
-  timezone/locale from upstream is kept and remembered, not overwritten.
+  logged, not persisted. `locale` is a routine substitution (`server` and
+  `mqtt` are the others), not in `BLOCKING_RULES` — `dev_device_info` is
+  polled often and a row per poll would bury the attempts that matter.
 * **Blocked attempts** (`rce`, `ota`, `secret`) mean the upstream tried to run a
   command, push firmware, or re-credential the device. These are rare, and each
   one is persisted (`events/models.py::BlockedAttempt`).
@@ -711,22 +712,20 @@ def _match_secret(node: dict, path: str, policy: RedactionPolicy,
 
 def _match_locale(node: dict, path: str, policy: RedactionPolicy,
                   out: RedactionResult) -> dict:
-    """`timezone` / `locale` for OUR device — adopt PetKit's, do not invent.
+    """`timezone` / `locale` for OUR device — keep ours, not PetKit's.
 
-    Both fields ride along on `dev_signup` and `dev_device_info`. The real cloud
-    sends the account's IANA zone as `locale` (e.g. `Europe/Stockholm`) and a
-    one-decimal offset as `timezone` (e.g. `2.0`). BLE provisioning uses the
-    same pair.
+    Both fields ride along on `dev_signup` and `dev_device_info`, which
+    `_match_secret` deliberately passes through whole. Proxied unchanged, the
+    device adopts the account's cloud-side values — on the reference install
+    that meant `timezone: 0.0, locale: "Etc/UTC"` replacing our `2.0`, visible
+    in its state reports minutes later. The device has no timezone of its own
+    beyond what it is told (`ctrl` takes one from BLE provisioning only), and a
+    wrong one is burned into video watermarks.
 
-    This used to overwrite those with whatever the container happened to think
-    (`0.0` / `""` on a UTC box), which burned the wrong offset into devices that
-    had a correct cloud account. Captured on the reference install: upstream
-    `Europe/Stockholm`/`2.0` was replaced with empty/`0.0` on every poll.
-
-    Same shape as `_match_secret`: capture + pass through. Adoption into
-    `device.config` happens in `_remember_upstream_credentials`, so a later
-    local `to_signup` / the provision form can reuse what the cloud already
-    decided. Nested accessory blocks are left alone.
+    Same shape as `_match_server`: only keys ALREADY PRESENT are overwritten, so
+    this never adds a field to a body that had none. Routine, so it is not in
+    `BLOCKING_RULES` — `dev_device_info` is polled often and a row per poll
+    would bury the attempts that matter.
     """
     device = policy.device
     if device is None:
@@ -740,29 +739,18 @@ def _match_locale(node: dict, path: str, policy: RedactionPolicy,
     if not about_us:
         return node
 
-    adopted: dict[str, Any] = {}
-    if "timezone" in node:
-        from petkit_local.utils.coerce import to_float
-        tz = to_float(node.get("timezone"), None)
-        if tz is not None:
-            adopted["timezone"] = tz
-    locale = node.get("locale")
-    if isinstance(locale, str) and locale:
-        adopted["locale"] = locale
-
-    if adopted:
-        # Merge with any earlier walk hit on the same body so a signup that
-        # carries both fields in one object is remembered as one pair.
-        prev = out.captured.get("time_settings") or {}
-        out.captured["time_settings"] = {**prev, **adopted}
-        if any(device.config.get(k) != v for k, v in adopted.items()):
-            out.records.append(Redaction(
-                rule=RULE_LOCALE, path=path or "result",
-                original={k: device.config.get(k) for k in adopted},
-                replacement=adopted,
-                note="adopted the account timezone/locale from upstream",
-            ))
-    return node
+    ours = {"timezone": device.timezone_offset, "locale": device.config.get("locale", "")}
+    patched = dict(node)
+    for key, value in ours.items():
+        if key not in node or node[key] == value:
+            continue
+        out.records.append(Redaction(
+            rule=RULE_LOCALE, path=f"{path}.{key}" if path else key,
+            original=node[key], replacement=value,
+            note="upstream would overwrite the device's local time settings",
+        ))
+        patched[key] = value
+    return patched
 
 
 # --- helpers ----------------------------------------------------------------
