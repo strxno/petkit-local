@@ -720,16 +720,15 @@ class MQTTBridge:
             feed = device.config.get("feed_schedule")
             return {"result": feed} if feed is not None else None
         if data_type == "dev_ble_device":
-            # Same shape as `http/handlers/ble_device.py`: always include `list`,
-            # empty when nothing is paired. Omitting it made the firmware log
-            # "ble list len too short"; PetKit's cloud sends `list: []` routinely.
-            # Goes through `build_ble_device_result` because THIS transport's
-            # compact separators land under the firmware's byte-length gate on
-            # their own — see that function's docstring.
+            # Same shape as `http/handlers/ble_device.py`: return empty result
+            # when nothing is paired. Only send the list when there are devices
+            # to report, with padding to clear the firmware's byte-length gate.
             lst = []
             if self._ble_registry:
                 for b in self._ble_registry.non_k3_for_parent(device.petkit_id):
                     lst.append(b.to_ble_list_entry())
+            if not lst:
+                return {"result": {}}
             return {"result": build_ble_device_result(lst)}
         return None
 

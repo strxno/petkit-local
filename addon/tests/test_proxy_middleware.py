@@ -866,10 +866,8 @@ async def test_the_real_api_secret_is_adopted_and_then_served_locally():
 
 
 async def test_the_ble_list_is_always_ours():
-    """An empty `list: []` from the cloud used to be feared fatal; PetKit's own
-    cloud sends it routinely. We still answer locally (LOCAL_ONLY) so a taken-
-    over device is not told to drop accessories paired here. Our reply matches
-    the cloud empty shape: `list: []` with nextTick."""
+    """We answer locally (LOCAL_ONLY) so a taken-over device is not told to
+    drop accessories paired here, even if the cloud has nothing to report."""
     hits = []
 
     async def cloud(request):
@@ -887,9 +885,7 @@ async def test_the_ble_list_is_always_ours():
         raw = await r.read()
         body = json.loads(raw)
 
-        assert body["result"]["list"] == []
-        assert body["result"]["nextTick"] == 3600
-        assert len(raw) >= MIN_BLE_REPLY_BYTES, "padded past the firmware's length gate"
+        assert body["result"] == {}
         # Still observed — proxy mode's whole purpose.
         assert hits == ["/6/t5/dev_ble_device"]
         entry = [e for e in hub.recent() if e["kind"] == "http"][-1]
