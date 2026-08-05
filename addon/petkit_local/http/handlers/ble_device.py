@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from petkit_local.devices.ble import build_ble_device_result
 from petkit_local.http.handlers._common import no_device_response, request_device
 
 
@@ -21,11 +20,8 @@ async def handle_ble_device(request: web.Request) -> web.Response:
 
     Returns:
         ``{"result": {"list": [...], "nextTick": 3600}}`` where each entry comes
-        from `BLEDevice.to_ble_list_entry()`. An empty `list` (not an omitted
-        key) matches the real cloud and satisfies the firmware's minimum-length
-        check (`ble list len too short` on a bare `{"result":{}}`) — see
-        `devices/ble.py::build_ble_device_result` for the byte-length margin
-        this alone does not guarantee.
+        from `BLEDevice.to_ble_list_entry()`, or the standard empty result when
+        the device is unknown or has no non-K3 accessories linked to it.
     """
     device = request_device(request)
     if not device:
@@ -38,4 +34,12 @@ async def handle_ble_device(request: web.Request) -> web.Response:
         for ble_dev in ble_registry.non_k3_for_parent(device.petkit_id):
             ble_list.append(ble_dev.to_ble_list_entry())
 
-    return web.json_response({"result": build_ble_device_result(ble_list)})
+    if not ble_list:
+        return no_device_response()
+
+    return web.json_response({
+        "result": {
+            "list": ble_list,
+            "nextTick": 3600,
+        }
+    })
