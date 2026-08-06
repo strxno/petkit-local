@@ -186,7 +186,7 @@ def test_both_join_states_count_as_joined():
     assert out["s7"] and out["s10"]
     assert not out["s6"] and not out["none"]
     assert out["unreported"] == "never reported"
-    assert "connecting to the server" in out["named"]
+    assert "connected to Wi-Fi" in out["named"]
 
 
 def test_a_reported_failure_is_named_rather_than_numbered():
@@ -203,9 +203,9 @@ def test_a_reported_failure_is_named_rather_than_numbered():
         none: pkJoinFailed(undefined),
       }));
     """)
-    assert out["pwd"] == [True, "the Wi-Fi password is wrong"]
-    assert out["missing"] == [True, "that Wi-Fi network was not found"]
+    assert out["pwd"] == [True, "incorrect Wi-Fi password"]
+    assert out["missing"] == [True, "Wi-Fi network not found"]
     assert out["wifi"][0] and out["server"][0]
-    assert "could not connect to the server" in out["server"][1]
+    assert "could not connect to server" in out["server"][1]
     # 9 is "connecting to MQTT" — progress, not a verdict.
     assert not out["ok7"] and not out["ok9"] and not out["none"]
