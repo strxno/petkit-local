@@ -49,6 +49,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Background BLE poll timer (`poll_ble_loop`). Panel "Poll" always works via
+# `request_ble_reading`. Set False only when debugging connect spam.
+BLE_POLL_TIMER = True
+
 # The embedded broker needs a moment to bind before the first connect attempt;
 # without it every startup wastes a full reconnect delay.
 STARTUP_DELAY_SECONDS = 2.0
@@ -560,7 +564,9 @@ class MQTTBridge:
         """
         if not self._client:
             return False
-        await self._ble_connect(device, ble, action=1)
+        # 30s hold: type-24 CTW3 parents otherwise open with timeout=0 and tear
+        # down before run-info lands; see params.time on thing.service.connect.
+        await self._ble_connect(device, ble, action=1, hold_s=30)
         self._ble_poll_ts[ble.petkit_id] = time.time()
         return True
 
@@ -580,6 +586,9 @@ class MQTTBridge:
         each accessory's `interval`, so this loop can tick often without
         talking often; `period` is only how finely those intervals are honoured.
         """
+        if not BLE_POLL_TIMER:
+            log.info("BLE poll timer disabled (BLE_POLL_TIMER=False)")
+            return
         while True:
             try:
                 await asyncio.sleep(period)
@@ -596,25 +605,35 @@ class MQTTBridge:
             except Exception:  # noqa: BLE001 - one bad poll must not end the loop
                 log.exception("BLE poll loop")
 
-    async def _ble_connect(self, device: Device, ble: BLEDevice, action: int) -> None:
+    async def _ble_connect(self, device: Device, ble: BLEDevice, action: int,
+                           hold_s: int = 0) -> None:
         """Open (`action=1`) or close (`action=0`) the parent's BLE session.
 
         `thing.service.connect` is the only way an accessory reports at all:
         the parent does not poll on its own initiative, so nothing arrives
         until this is pushed. Closing matters too — an accessory whose session
         is never ended keeps the parent's radio busy between readings.
+
+        `hold_s` maps to the parent's `params.time` (session hold / timeout).
+        Firmware logs it as `timeout`; 0 means "not told how long to stay".
         """
         if not self._client:
             return
         now = int(time.time())
+        params: dict[str, Any] = {
+            "connect_action": action,
+            "device": {"type": ble.ble_type_int, "mac": ble.wire_mac},
+            "timestamp": now,
+        }
+        # Only on open: a hold tells ble how long to keep the radio up so a
+        # late status read (type-24 CTW3 path) is not racing a zero-timeout
+        # teardown. Disconnect does not need it.
+        if action and hold_s > 0:
+            params["time"] = int(hold_s)
         envelope = {
             "method": "thing.service.connect",
             "id": str(now),
-            "params": {
-                "connect_action": action,
-                "device": {"type": ble.ble_type_int, "mac": ble.wire_mac},
-                "timestamp": now,
-            },
+            "params": params,
             "version": "1.0.0",
         }
         topic = service_topic(device.mqtt_product_key, device.mqtt_device_name, "connect")
@@ -625,9 +644,10 @@ class MQTTBridge:
         # place somebody debugging a silent accessory would look.
         if self._hub:
             self._hub.record_mqtt(device.petkit_id, topic, payload, outbound=True)
-        log.info("BLE %s -> %s (mac=%s) via parent %d",
+        log.info("BLE %s -> %s (mac=%s) via parent %d%s",
                  "connect" if action else "disconnect",
-                 ble.ble_type, ble.mac, device.petkit_id)
+                 ble.ble_type, ble.mac, device.petkit_id,
+                 f" hold={hold_s}s" if action and hold_s else "")
 
     async def _poll_ble_accessories(self, device: Device) -> None:
         """Ask the parent to open a BLE relay session for each linked accessory
@@ -650,7 +670,7 @@ class MQTTBridge:
             if now - self._ble_poll_ts.get(ble.petkit_id, 0) < interval:
                 continue
             self._ble_poll_ts[ble.petkit_id] = now
-            await self._ble_connect(device, ble, action=1)
+            await self._ble_connect(device, ble, action=1, hold_s=30)
 
     async def _reply_user_get(self, device: Device, params: dict) -> None:
         """Answer an MQTT data_get by publishing the requested resource to
@@ -803,6 +823,10 @@ class MQTTBridge:
             log.info("Decoded %s (id=%d) from parent %d: %s",
                      ble_dev.ble_type.upper(), ble_dev.petkit_id,
                      device.petkit_id, json.dumps(fragment)[:120])
+            # Status is in; release the radio. Non-status replies (251/252,
+            # write ACKs) must NOT close the session — type-24 CTW3 parents
+            # often emit those first while run-info is still in flight.
+            await self._ble_connect(device, ble_dev, action=0)
         else:
             # Not a status frame, or one we cannot read. Either way, name what
             # came back: a write is answered with a bare `01` on its own cmd,
@@ -819,10 +843,6 @@ class MQTTBridge:
                 log.info("%s ble_response not decodable yet (id=%d) - turn capture on in the "
                          "panel (Setup -> Settings) to collect frames",
                          ble_dev.ble_type.upper(), ble_dev.petkit_id)
-
-        # The reading is in; let the parent close its radio rather than holding
-        # the session until something else happens to end it.
-        await self._ble_connect(device, ble_dev, action=0)
 
         if self._ha_publisher:
             await self._ha_publisher.publish_ble_discovery(ble_dev)

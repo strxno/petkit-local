@@ -24,7 +24,7 @@ from petkit_local.http.server import create_app
 from petkit_local.http.handlers.upload_file_info import wait_for_pending as wait_for_media_tasks
 from petkit_local.http.proxy import close_proxy_session
 from petkit_local.ha.publisher import HAPublisher
-from petkit_local.mqtt.bridge import MQTTBridge
+from petkit_local.mqtt.bridge import BLE_POLL_TIMER, MQTTBridge
 from petkit_local.web.hub import EventHub
 from petkit_local.http.bucket import create_bucket_app
 from petkit_local.web.panel import create_panel_app
@@ -486,7 +486,8 @@ def main() -> None:
         # A BLE accessory reports only when we tell its parent to open a
         # session. Reacting to the parent's own traffic is not enough — a
         # feeder has none to react to (see `poll_ble_loop`).
-        if mqtt_bridge is not None:
+        # Gated by BLE_POLL_TIMER so the loop can be disabled for debugging.
+        if mqtt_bridge is not None and BLE_POLL_TIMER:
             _spawn(app_instance, "ble-poll", mqtt_bridge.poll_ble_loop())
 
         sweeper = RetentionSweeper(event_store, retention_config,
