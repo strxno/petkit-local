@@ -141,40 +141,50 @@ function retentionNoticeHtml(data) {
   </div>`;
 }
 
-//: Median absolute deviation is 0 for a single confirmed sample, which would
-//: make a legend read "±0 g" and look like a measurement rather than a
-//: one-visit guess — so the confidence text only appears once there is
-//: enough evidence to say anything.
-const MIN_STATS_SAMPLES_TO_SHOW = 3;
+//: Fallback only — the server always sends `min_corroborating_samples`
+//: (`ai/weight.py::MIN_CORROBORATING_SAMPLES`), and this legend uses THAT,
+//: never a hardcoded copy of its own. A confirmed real case: a pet with 4
+//: confirmed visits (one below the backend's own trust bar of 5) offered a
+//: "use this" suggestion here before this fix, at a moment the backend
+//: itself would grade every one of that pet's weight matches `unverified`
+//: rather than `inferred` — the UI was more confident than the data it was
+//: showing. If this constant is ever missing from a response, matching the
+//: backend's own default is the safer fallback than an arbitrarily lower one.
+const FALLBACK_MIN_SAMPLES = 5;
 
-function legendHtml(pets, colors, visits) {
+function legendHtml(pets, colors, visits, minSamples) {
   const counts = new Map();
   for (const v of visits) {
     const key = seriesKey(v);
-    const c = counts.get(key) || { confirmed: 0, inferred: 0 };
+    const c = counts.get(key) || { confirmed: 0, inferred: 0, unverified: 0 };
     if (v.pet_id != null) c.confirmed++;
-    else if (v.attributed_pet_id != null) c.inferred++;
+    // A weight match's OWN grade decides the bucket — never just "has an
+    // attributed_pet_id" — because that binary check is exactly what showed
+    // 32 uncorroborated guesses as if they were 32 trusted ones.
+    else if (v.grade === 'inferred') c.inferred++;
+    else if (v.attributed_pet_id != null) c.unverified++;
     counts.set(key, c);
   }
   const rows = pets
     .map(p => {
       const key = String(p.id);
-      const c = counts.get(key) || { confirmed: 0, inferred: 0 };
+      const c = counts.get(key) || { confirmed: 0, inferred: 0, unverified: 0 };
       const weightKg = p.weight != null ? (p.weight / 1000).toFixed(2) : null;
-      const observed =
-        p.observed && p.observed.n_confirmed >= MIN_STATS_SAMPLES_TO_SHOW
-          ? `≈ ${(p.observed.median / 1000).toFixed(2)} kg from ${p.observed.n_confirmed} recognised visit${p.observed.n_confirmed === 1 ? '' : 's'} (±${Math.round(p.observed.spread)} g)`
+      const enoughSamples = p.observed && p.observed.n_confirmed >= minSamples;
+      const observed = enoughSamples
+        ? `≈ ${(p.observed.median / 1000).toFixed(2)} kg from ${p.observed.n_confirmed} recognised visit${p.observed.n_confirmed === 1 ? '' : 's'} (±${Math.round(p.observed.spread)} g)`
+        : p.observed
+          ? `${p.observed.n_confirmed} recognised visit${p.observed.n_confirmed === 1 ? '' : 's'} so far — needs ${minSamples} before suggesting a weight`
           : null;
-      const suggest =
-        p.observed && p.observed.n_confirmed >= MIN_STATS_SAMPLES_TO_SHOW
-          ? `<button class="ghost act" data-action="in-suggest-weight" data-id="${esc(p.id)}" data-weight="${esc(p.observed.median)}" data-name="${esc(p.name)}">use this</button>`
-          : '';
+      const suggest = enoughSamples
+        ? `<button class="ghost act" data-action="in-suggest-weight" data-id="${esc(p.id)}" data-weight="${esc(p.observed.median)}" data-name="${esc(p.name)}">use this</button>`
+        : '';
       return `<div class="row" style="align-items:center;gap:8px">
         <span class="chart-swatch" style="background:${esc(colors.get(key))}"></span>
         <b>${esc(p.name)}</b>
         <span class="mut">${weightKg != null ? weightKg + ' kg entered' : 'no weight set'}</span>
         <span class="grow"></span>
-        <span class="mut">${c.confirmed} confirmed · ${c.inferred} inferred</span>
+        <span class="mut">${c.confirmed} confirmed · ${c.inferred} inferred${c.unverified ? ` · ${c.unverified} unverified` : ''}</span>
       </div>${observed ? `<p class="sub mut" style="margin:2px 0 8px">${esc(observed)} ${suggest}</p>` : ''}`;
     })
     .join('');
@@ -182,9 +192,15 @@ function legendHtml(pets, colors, visits) {
   return `<div class="card">
     <h3>Pets</h3>
     ${rows || '<p class="mut">No pets yet.</p>'}
+    <p class="sub mut" style="margin-top:8px">
+      <b>Inferred</b> — weight matched a pet whose entered weight is backed by
+      ${minSamples}+ recognised visits. <b>Unverified</b> — weight matched, but
+      that pet has too few recognised visits to trust the match yet; treat these
+      as low-confidence.
+    </p>
     ${
       unattributedCount
-        ? `<p class="mut" style="margin-top:8px">${unattributedCount} visit${unattributedCount === 1 ? '' : 's'} in this range matched no pet — too far from any entered weight, or ambiguous between two.</p>`
+        ? `<p class="mut" style="margin-top:4px">${unattributedCount} visit${unattributedCount === 1 ? '' : 's'} in this range matched no pet — too far from any entered weight, or ambiguous between two.</p>`
         : ''
     }
   </div>`;
@@ -315,7 +331,7 @@ function renderInsights() {
   v.innerHTML = `
     ${retentionNoticeHtml(data)}
     ${controlsHtml(IN_DEVICES, pets, colors)}
-    ${legendHtml(pets, colors, data.visits)}
+    ${legendHtml(pets, colors, data.visits, data.min_corroborating_samples ?? FALLBACK_MIN_SAMPLES)}
     <div class="card"><h3>Observed weights</h3>${weightHistogramHtml(pets, colors, data.visits)}</div>
     <div class="card"><h3>Weight over time</h3>${weightOverTimeHtml(pets, colors, data.visits)}</div>
     <div class="card"><h3>Visits per day</h3>${visitsPerDayHtml(pets, colors, data.visits)}</div>
@@ -395,7 +411,20 @@ onAction('chart-bucket-click', el => {
   const pet = (IN_LAST.pets || []).find(p => String(p.id) === key);
   if (!pet) return;
   const weight = Math.round(Number(weightAttr));
-  if (!confirm(`Set ${pet.name}'s weight to ${(weight / 1000).toFixed(2)} kg?`)) return;
+  const count = Number(el.dataset.count) || 0;
+  // A bucket built from one or two visits is exactly the shape a single bad
+  // reading produces — the confirm dialog says so rather than presenting a
+  // one-visit bar with the same confidence as a well-supported one.
+  const caution =
+    count <= 2
+      ? `\n\nOnly ${count} visit${count === 1 ? '' : 's'} in this bar — a single bad reading could be behind it.`
+      : '';
+  if (
+    !confirm(
+      `Set ${pet.name}'s weight to ${(weight / 1000).toFixed(2)} kg (from ${count} visit${count === 1 ? '' : 's'} in this bar)?${caution}`,
+    )
+  )
+    return;
   api('pets/' + pet.id, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

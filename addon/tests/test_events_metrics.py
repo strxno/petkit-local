@@ -28,6 +28,17 @@ def test_empty_input_produces_an_empty_but_well_shaped_response():
     assert out["retention_cutoff_ts"] is None
 
 
+def test_response_carries_the_backend_corroboration_threshold():
+    """The panel must read this from the response rather than hardcoding its
+    own copy — the two independently drifting was exactly what let a
+    'use this' suggestion appear in the UI below the sample count the
+    backend itself requires before trusting a profile."""
+    from petkit_local.ai import weight as weight_mod
+    out = build_insights([], [], {}, start_ts=0.0, end_ts=100.0, tz_offset=0.0,
+                         retention_cutoff_ts=None)
+    assert out["min_corroborating_samples"] == weight_mod.MIN_CORROBORATING_SAMPLES
+
+
 def test_a_face_confirmed_visit_carries_pet_id_and_no_attributed_pet_id():
     pets = [{"id": 1, "name": "Milo", "weight": 3200.0, "faces": []}]
     visits = [_visit(pet_id=1, weight=3200.0)]

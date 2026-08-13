@@ -195,16 +195,62 @@ class WeightStats:
     n: int
 
 
-def weight_stats(weights: list[float]) -> WeightStats | None:
-    """Median and spread of `weights`, or None for an empty list."""
-    if not weights:
-        return None
+#: How far (in multiples of MAD) an observation may sit from the first-pass
+#: median before the second pass drops it. Confirmed on real household data:
+#: a pet with 4 confirmed visits reported a 5.01 kg median against an entered
+#: (and otherwise consistent) weight of 3.39 kg — one or two visits inflated
+#: by litter debris, a partial settle, or a genuinely bad read are enough to
+#: drag a small sample's PLAIN median a long way, because at n=4 the middle
+#: two values are still close to the edges. A `0.08`-tolerance band elsewhere
+#: absorbs ordinary variation; this constant is a much LOOSER net that only
+#: exists to catch readings nothing plausible produced.
+OUTLIER_MAD_MULTIPLE = 4.0
+#: Floor for the trim threshold, same role `ABS_FLOOR_G` plays for `band()`:
+#: without it, a tightly clustered sample (MAD near zero) would have its trim
+#: window collapse to nothing and discard normal noise as if it were a
+#: measurement fault.
+OUTLIER_FLOOR_G = 300.0
+#: Below this many points, discarding any of them risks throwing away most of
+#: the sample rather than an outlier within it — the raw (untrimmed) stats
+#: are the more honest answer at that size.
+MIN_SAMPLES_TO_TRIM = 4
+
+
+def _median_and_mad(weights: list[float]) -> tuple[float, float]:
     sorted_w = sorted(weights)
     n = len(sorted_w)
     median = (sorted_w[n // 2] if n % 2 else (sorted_w[n // 2 - 1] + sorted_w[n // 2]) / 2)
     deviations = sorted(abs(w - median) for w in weights)
     dn = len(deviations)
     mad = (deviations[dn // 2] if dn % 2 else (deviations[dn // 2 - 1] + deviations[dn // 2]) / 2)
+    return median, mad
+
+
+def weight_stats(weights: list[float]) -> WeightStats | None:
+    """Median and spread of `weights`, or None for an empty list.
+
+    Two passes at `MIN_SAMPLES_TO_TRIM` or more: the first pass's median finds
+    the middle of the sample, then any observation more than
+    `OUTLIER_MAD_MULTIPLE` MADs from it is dropped before the SECOND pass
+    reports what a household actually reads (as the pet's suggested weight,
+    the calibration histogram's tick, and `corroborated()`'s input) — see
+    `OUTLIER_MAD_MULTIPLE`'s comment for the real-world case this fixes.
+    `n` is always the ORIGINAL count, not the trimmed one: it answers "how
+    much evidence backs this", and silently shrinking it would overstate how
+    little evidence a suspicious sample actually has.
+    """
+    if not weights:
+        return None
+    median, mad = _median_and_mad(weights)
+    n = len(weights)
+    if n >= MIN_SAMPLES_TO_TRIM:
+        threshold = max(OUTLIER_FLOOR_G, OUTLIER_MAD_MULTIPLE * mad)
+        trimmed = [w for w in weights if abs(w - median) <= threshold]
+        # Never trim down to a razor-thin remainder — if MOST of the sample
+        # looks like an outlier, the sample is the story, not a data-quality
+        # fix for it.
+        if len(trimmed) >= max(3, n // 2):
+            median, mad = _median_and_mad(trimmed)
     return WeightStats(median=median, spread=mad, n=n)
 
 

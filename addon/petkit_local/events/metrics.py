@@ -140,6 +140,12 @@ def build_insights(pets: list[dict[str, Any]], visits: list[dict[str, Any]],
     return {
         "start": start_ts, "end": end_ts, "tz_offset": tz_offset,
         "retention_cutoff_ts": retention_cutoff_ts,
+        # The panel must not hardcode its own copy of this — a "use this"
+        # suggestion offered below the sample count the backend itself
+        # requires before trusting a profile (`ai/weight.py::corroborated`)
+        # is exactly how a bad 4-sample median reached a household's screen
+        # looking like a confident answer.
+        "min_corroborating_samples": weight_mod.MIN_CORROBORATING_SAMPLES,
         "pets": pet_rows,
         "visits": visit_rows,
     }

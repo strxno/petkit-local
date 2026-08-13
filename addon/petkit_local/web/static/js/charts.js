@@ -86,7 +86,7 @@ function stackedBarChart({ bars, colorFor, height = 220, yFmt, title }) {
           const h = (innerH * seg.value) / yTop;
           yCursor -= h;
           const weightAttr = bar.midpoint != null ? ` data-weight="${esc(bar.midpoint)}"` : '';
-          return `<rect class="chart-mark" x="${x.toFixed(1)}" y="${yCursor.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" fill="${esc(colorFor(seg.key))}" data-action="chart-bucket-click" data-bucket="${esc(bar.label)}" data-key="${esc(seg.key)}"${weightAttr}><title>${esc(bar.label)}: ${seg.value}</title></rect>`;
+          return `<rect class="chart-mark" x="${x.toFixed(1)}" y="${yCursor.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" fill="${esc(colorFor(seg.key))}" data-action="chart-bucket-click" data-bucket="${esc(bar.label)}" data-key="${esc(seg.key)}" data-count="${esc(seg.value)}"${weightAttr}><title>${esc(bar.label)}: ${seg.value}</title></rect>`;
         })
         .join('');
       const showLabel = n <= 14 || i % Math.ceil(n / 14) === 0;

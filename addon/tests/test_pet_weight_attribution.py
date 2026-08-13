@@ -6,7 +6,7 @@ recognition) is never overridden and this module never returns
 """
 from petkit_local.ai.weight import (
     WeightProfile, attribute, attribute_visit, band,
-    build_profiles, corroborated,
+    build_profiles, corroborated, weight_stats,
 )
 from petkit_local.events import codes
 
@@ -139,6 +139,43 @@ def test_corroborated_uses_the_median_not_the_mean():
 def test_corroborated_flags_a_stored_weight_that_disagrees_with_evidence():
     weights = [4900.0, 5000.0, 5100.0, 5050.0, 4950.0]
     assert corroborated(3200.0, weights) is False
+
+
+def test_weight_stats_trims_a_single_bad_reading_before_reporting():
+    """Real household case: one clearly bad reading (litter debris, a partial
+    settle) among several consistent ones must not become the reported
+    median — a plain median at this sample size still lands close to the
+    outlier, which is what made an inflated suggestion look trustworthy."""
+    weights = [3350.0, 3400.0, 3420.0, 3390.0, 8200.0]
+    stats = weight_stats(weights)
+    assert 3350.0 <= stats.median <= 3420.0
+    assert stats.n == 5  # evidence count is the ORIGINAL count, not post-trim
+
+
+def test_weight_stats_does_not_trim_below_four_samples():
+    """Trimming needs enough points that discarding one is plausible rather
+    than arbitrary — below that, the untrimmed median is the honest answer."""
+    weights = [3200.0, 3400.0, 9000.0]
+    stats = weight_stats(weights)
+    assert stats.median == 3400.0  # the untrimmed median of these 3
+    assert stats.n == 3
+
+
+def test_weight_stats_refuses_to_trim_when_it_would_gut_the_sample():
+    """A sample where roughly HALF the readings disagree is not "one outlier
+    plus good data" — it is telling you something, and silently discarding
+    half of it would manufacture false confidence rather than remove noise."""
+    weights = [3390.0, 3410.0, 7900.0, 7950.0]
+    stats = weight_stats(weights)
+    assert stats.n == 4
+    # No crash, and the reported median still comes from all 4 points (the
+    # trim guard refused to drop half the sample) -- this is the case the
+    # UI's own sample-count gate (not this function) is responsible for
+    # catching, by not offering a "use this" suggestion at n=4 by default.
+
+
+def test_weight_stats_empty_is_none():
+    assert weight_stats([]) is None
 
 
 def test_build_profiles_skips_pets_with_no_weight():
