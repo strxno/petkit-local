@@ -863,10 +863,19 @@ class EventStore:
         owner means by "today". Counting from UTC midnight instead credits a
         00:30 visit on a UTC+2 install to the previous day, and the sensor
         reads low every morning until the offset has passed.
+
+        Filtered on `codes.VISIT_SUMMARY_CODES`, not `event_kind ==
+        KIND_TOILET` alone: a single visit can carry several toilet_visit
+        rows (a code "9" mid-visit weight sample shares the visit's
+        `related_event` with its code "10" close-out), and counting rows
+        instead of visits published `visits_today` several times too high on
+        an HTTP T5. `VISIT_SUMMARY_CODES` is exactly the report that CLOSES a
+        visit, one per visit, on either transport.
         """
         now = now if now is not None else time.time()
         day_start = local_day_start(now)
-        visit = (Event.pet_id == pet_id, Event.event_kind == codes.KIND_TOILET)
+        visit = (Event.pet_id == pet_id, Event.event_kind == codes.KIND_TOILET,
+                 Event.event_type.in_(codes.VISIT_SUMMARY_CODES))
 
         async with self._read() as session:
             latest_row = await session.scalar(

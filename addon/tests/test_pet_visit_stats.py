@@ -75,6 +75,44 @@ async def test_stats_visits_today_counts_only_same_local_day(event_store):
     assert stats["visits_today"] == 2
 
 
+async def test_stats_count_visits_not_reports(event_store):
+    """One visit can emit several `event_kind='toilet_visit'` rows sharing a
+    `related_event`: on an HTTP T5, code "9" mid-visit weight samples plus the
+    closing code "10". Counting rows instead of visits published
+    `visits_today` several times too high — this is the regression the
+    `VISIT_SUMMARY_CODES` filter in `pet_visit_stats` fixes.
+    """
+    store = event_store
+    # One visit, three code-9 samples plus its code-10 close-out, all sharing
+    # related_event and all inside "today".
+    for i, ts_offset in enumerate((10, 20, 30, 40)):
+        await store.upsert_event({
+            "device_id": 5, "event_type": "9" if i < 3 else "10",
+            "event_kind": "toilet_visit", "pet_id": 1, "related_event": "r1",
+            "ts": 1000.0 + ts_offset,
+        })
+    stats = await store.pet_visit_stats(1, now=2000.0)
+    assert stats["visits_today"] == 1
+    assert stats["last_visit_ts"] == 1040.0
+
+
+async def test_stats_last_visit_is_never_a_mid_visit_sample(event_store):
+    """A later code "9" sample must not be read as a newer "visit" than an
+    earlier visit's own code "10" close-out."""
+    store = event_store
+    await store.upsert_event({"device_id": 5, "event_type": "10", "event_kind": "toilet_visit",
+                              "pet_id": 1, "related_event": "r1", "ts": 100.0,
+                              "content_json": '{"pet_weight": 2200}'})
+    # A stray/late code-9 sample, timestamped AFTER the visit it belongs to
+    # already closed — must not become "the last visit".
+    await store.upsert_event({"device_id": 5, "event_type": "9", "event_kind": "toilet_visit",
+                              "pet_id": 1, "related_event": "r1", "ts": 500.0,
+                              "content_json": '{"pet_weight": 9999}'})
+    stats = await store.pet_visit_stats(1, now=1000.0)
+    assert stats["last_visit_ts"] == 100.0
+    assert stats["last_visit_weight"] == 2200
+
+
 async def test_stats_ignore_other_pets_and_non_visit_events(event_store):
     store = event_store
     await store.upsert_event({"device_id": 5, "event_type": "pet_out", "event_kind": "toilet_visit",
