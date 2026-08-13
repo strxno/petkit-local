@@ -57,6 +57,26 @@ def _confirmed_weight_stats(pets: list[dict[str, Any]],
     return stats
 
 
+def build_weight_profiles(pets: list[dict[str, Any]],
+                          visits: list[dict[str, Any]]) -> list[weight_mod.WeightProfile]:
+    """`ai/weight.py::build_profiles`, from `visit_summaries`-shaped rows.
+
+    `ai/weight.py` reads an observed weight off a TOP-LEVEL `pet_weight` key
+    (its own docstring: "or any dict carrying pet_id and an observed weight
+    under weight_g/pet_weight/petWeight") — it knows nothing about
+    `content_json`, deliberately, since it has no I/O and no wire-format
+    knowledge of its own. A `visit_summaries` row carries the weight nested
+    inside `content_json`, so it is flattened here, once, rather than
+    teaching the pure attribution module about the store's row shape.
+
+    Shared by `build_insights` and the Timeline's weight-inferred badge
+    (`web/api/timeline.py`) so "how a pet's weight profile is built" stays
+    defined in exactly one place.
+    """
+    flattened = [{**v, "pet_weight": ingest._weight_of(v)} for v in visits]
+    return weight_mod.build_profiles(pets, flattened)
+
+
 def build_insights(pets: list[dict[str, Any]], visits: list[dict[str, Any]],
                    pet_in_starts: dict[str, float], *, start_ts: float, end_ts: float,
                    tz_offset: float, retention_cutoff_ts: float | None) -> dict[str, Any]:
@@ -73,15 +93,7 @@ def build_insights(pets: list[dict[str, Any]], visits: list[dict[str, Any]],
             so the UI can mark a range that runs past it as "history ends
             here" rather than "the pet stopped visiting".
     """
-    # `ai/weight.py` reads an observed weight off a TOP-LEVEL `pet_weight` key
-    # (its own docstring: "or any dict carrying pet_id and an observed weight
-    # under weight_g/pet_weight/petWeight") — it knows nothing about
-    # `content_json`, deliberately, since it has no I/O and no wire-format
-    # knowledge of its own. A `visit_summaries` row carries the weight nested
-    # inside `content_json`, so it is flattened here, once, rather than
-    # teaching the pure attribution module about the store's row shape.
-    flattened = [{**v, "pet_weight": ingest._weight_of(v)} for v in visits]
-    profiles = weight_mod.build_profiles(pets, flattened)
+    profiles = build_weight_profiles(pets, visits)
     observed_stats = _confirmed_weight_stats(pets, visits)
 
     visit_rows = []

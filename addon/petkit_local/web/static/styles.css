@@ -1383,6 +1383,16 @@ details.adv summary {
   margin-right: 5px;
   vertical-align: -3px;
 }
+/* A weight-inferred pet (`web/api/timeline.py`'s attribution pass, backed by
+   ai/weight.py) — never the same solid pill as a face-confirmed one. Dashed
+   border and no background tint, so it reads as "a guess drawn on top of
+   .tl-pet's shape" rather than a fifth colour to learn. The `~` prefix
+   `timeline.js` adds survives even with color vision alone ruled out. */
+.tl-pet-inferred {
+  background: transparent;
+  border: 1px dashed var(--mut);
+  color: var(--mut);
+}
 
 /* ==== TIMELINE ==== */
 /* timeline — a left time-gutter with the content column beside it, so

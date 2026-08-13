@@ -5,7 +5,7 @@ like `web/api/_common.py::_pets_by_id` (a `faces` list already attached).
 """
 import json
 
-from petkit_local.events.metrics import build_insights
+from petkit_local.events.metrics import build_insights, build_weight_profiles
 
 
 def _visit(pet_id=None, weight=None, ts=100.0, device_id=1, related=None):
@@ -100,3 +100,17 @@ def test_retention_cutoff_is_echoed_back_unchanged():
     out = build_insights([], [], {}, start_ts=0.0, end_ts=100.0, tz_offset=0.0,
                          retention_cutoff_ts=42.0)
     assert out["retention_cutoff_ts"] == 42.0
+
+
+def test_build_weight_profiles_flattens_content_json_for_ai_weight():
+    """`ai/weight.py::build_profiles` reads a TOP-LEVEL `pet_weight` key and
+    knows nothing about `content_json` — this is the glue, and the one thing
+    worth pinning down is that it actually bridges the two shapes rather than
+    silently handing ai/weight.py rows it can never read a weight off of."""
+    pets = [{"id": 1, "name": "Milo", "weight": 3200.0, "faces": []}]
+    confirmed = [_visit(pet_id=1, weight=w, ts=float(i))
+                for i, w in enumerate((3190, 3210, 3200, 3205, 3195))]
+    profiles = build_weight_profiles(pets, confirmed)
+    assert len(profiles) == 1
+    assert profiles[0].pet_id == 1
+    assert profiles[0].corroborated is True
