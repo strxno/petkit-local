@@ -181,6 +181,33 @@ def _visit_weight(visit: dict[str, Any]) -> float | None:
         visit.get("weight_g", visit.get("pet_weight", visit.get("petWeight"))), None)
 
 
+@dataclass(frozen=True)
+class WeightStats:
+    """Summary of a pet's face-confirmed observed weights.
+
+    `spread` is the median absolute deviation, not a standard deviation —
+    same reasoning as using the median for the centre: one outlier (two cats
+    briefly sharing the box) must not blow up the summary a household actually
+    reads on the Insights calibration view.
+    """
+    median: float
+    spread: float
+    n: int
+
+
+def weight_stats(weights: list[float]) -> WeightStats | None:
+    """Median and spread of `weights`, or None for an empty list."""
+    if not weights:
+        return None
+    sorted_w = sorted(weights)
+    n = len(sorted_w)
+    median = (sorted_w[n // 2] if n % 2 else (sorted_w[n // 2 - 1] + sorted_w[n // 2]) / 2)
+    deviations = sorted(abs(w - median) for w in weights)
+    dn = len(deviations)
+    mad = (deviations[dn // 2] if dn % 2 else (deviations[dn // 2 - 1] + deviations[dn // 2]) / 2)
+    return WeightStats(median=median, spread=mad, n=n)
+
+
 def corroborated(weight_g: float, confirmed_weights: list[float]) -> bool:
     """Whether face-confirmed visits actually support `weight_g`.
 
@@ -191,11 +218,9 @@ def corroborated(weight_g: float, confirmed_weights: list[float]) -> bool:
     """
     if len(confirmed_weights) < MIN_CORROBORATING_SAMPLES:
         return False
-    sorted_w = sorted(confirmed_weights)
-    n = len(sorted_w)
-    median = (sorted_w[n // 2] if n % 2 else (sorted_w[n // 2 - 1] + sorted_w[n // 2]) / 2)
+    stats = weight_stats(confirmed_weights)
     lo, hi = band(weight_g)
-    return lo <= median <= hi
+    return lo <= stats.median <= hi
 
 
 def build_profiles(pets: list[dict[str, Any]],

@@ -28,13 +28,17 @@ from petkit_local.events.normalize import (CATEGORY_CLOUD_DOUBLE, CATEGORY_HEALT
                                            is_detail_event, parse_event_report_form,
                                            telemetry_only)
 from petkit_local.events.sessions import (CYCLE_TAIL_WINDOW_SEC, SUB_EVENT_WINDOW_SEC,
+                                          _duration_of, _started_at, _weight_of,
                                           content_of_row, filter_counts, group_sessions,
                                           matches_filter, state_of_row)
 
 #: Also what marks the imports above as used, so the lint gate does not read a
-#: re-export as dead code. The four private names are here because callers
-#: outside the package already reached for them: `main.py` for the media
-#: category table, the tests for the content decoder and the pet-id extractors.
+#: re-export as dead code. The private names are here because callers outside
+#: the package already reached for them: `main.py` for the media category
+#: table, the tests for the content decoder and the pet-id extractors, and
+#: `events/metrics.py` for the same weight/duration/start-time extraction
+#: `_session_from_visit` already does — reusing it there keeps "how a visit's
+#: weight and duration are read off the wire" defined in exactly one place.
 __all__ = [
     "CATEGORY_CLOUD_DOUBLE",
     "CATEGORY_HEALTH",
@@ -50,8 +54,11 @@ __all__ = [
     "SUB_EVENT_WINDOW_SEC",
     "_MODULE_TYPE_TO_CATEGORY",
     "_as_dict",
+    "_duration_of",
     "_extract_pet_ref",
     "_extract_score",
+    "_started_at",
+    "_weight_of",
     "apply_derived_state",
     "apply_state_snapshot",
     "backfill_event_rows",
