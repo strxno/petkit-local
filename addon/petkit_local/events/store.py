@@ -56,6 +56,21 @@ _ADDED_COLUMNS = {
     "pets": {"device_pet_ids_json": "TEXT"},
 }
 
+# Indexes added after the first release. Unlike a column, an index declared on
+# `Base.metadata` (in `events/models.py::Event.__table_args__`) is NOT enough
+# on its own: `create_all` in `connect()` only creates objects that do not
+# exist AT ALL, so it reaches a brand-new database and never reaches one that
+# already has an `events` table — exactly backwards from who needs the index.
+# SQLite (unlike `ALTER TABLE ADD COLUMN`) DOES support `IF NOT EXISTS` on
+# `CREATE INDEX`, so this can be unconditional and idempotent rather than
+# needing the PRAGMA-driven existence check `_ADDED_COLUMNS` needs.
+_ADDED_INDEXES = {
+    # `visit_summaries` scans a `ts` range but only wants the ~2% of rows in
+    # it that are toilet_visit — without this, that 2% is found by reading
+    # every row `idx_events_ts` hands back rather than by seeking to them.
+    "idx_events_kind_ts": ("events", "event_kind", "ts"),
+}
+
 
 def _writable(model: type[Base]) -> tuple[str, ...]:
     """Column names a caller's dict may set, in schema order.
@@ -200,6 +215,14 @@ class EventStore:
                     await conn.exec_driver_sql(
                         f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")
                     log.info("Migrated %s: added column %s", table, name)
+
+        # See `_ADDED_INDEXES`'s comment for why this is a second mechanism
+        # rather than folded into the loop above: SQLite supports
+        # `IF NOT EXISTS` on an index but not on `ADD COLUMN`, so this needs
+        # no existence probe of its own.
+        for index_name, (table, *cols) in _ADDED_INDEXES.items():
+            await conn.exec_driver_sql(
+                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({', '.join(cols)})")
 
     async def _migrate_legacy_faces(self) -> None:
         """Carry a pre-`pet_faces` single photo into the new table.
@@ -686,6 +709,62 @@ class EventStore:
         for e in events:
             e["media"] = media_by_related.get(e.get("related_event") or "", [])
         return events
+
+    #: Columns `visit_summaries` actually needs. Deliberately NOT
+    #: `select(Event)`: `state_json` averages ~1.2 kB per row
+    #: (`web/api/timeline.py`'s own measurement) and this query's whole point
+    #: is scanning many months of rows at once, so hydrating it here would be
+    #: the single biggest cost in the query for a key nothing downstream reads.
+    _VISIT_SUMMARY_COLUMNS = (
+        Event.id, Event.device_id, Event.device_type, Event.ts,
+        Event.related_event, Event.pet_id, Event.pet_ref, Event.event_type,
+        Event.content_json,
+    )
+
+    async def visit_summaries(self, start_ts: float, end_ts: float,
+                              device_id: int | None = None) -> list[dict[str, Any]]:
+        """The one closing report per toilet visit in `[start_ts, end_ts)`.
+
+        Backs the Insights tab and `ai/weight.py`'s attribution: unlike
+        `query_timeline`, this returns exactly one row per visit
+        (`codes.VISIT_SUMMARY_CODES` — see its docstring for why a visit's own
+        mid-visit weight samples must not be counted alongside it), carries no
+        media join, and selects only the columns a visit metric needs. Rows
+        come back oldest-first, matching how a caller building a day-by-day
+        series wants to consume them.
+        """
+        stmt = (
+            select(*self._VISIT_SUMMARY_COLUMNS)
+            .where(Event.event_kind == codes.KIND_TOILET,
+                  Event.event_type.in_(codes.VISIT_SUMMARY_CODES),
+                  Event.ts >= start_ts, Event.ts < end_ts)
+            .order_by(Event.ts.asc())
+        )
+        if device_id is not None:
+            stmt = stmt.where(Event.device_id == device_id)
+        async with self._read() as session:
+            rows = await session.execute(stmt)
+            return [dict(row._mapping) for row in rows]
+
+    async def pet_in_starts(self, related_events: list[str]) -> dict[str, float]:
+        """Earliest `pet_in` timestamp per `related_event`, for durations.
+
+        A code "10" visit summary carries its own `time_in`/`time_out`
+        (`events/sessions.py::_duration_of` prefers those), but an MQTT
+        `pet_out` has neither, so pairing it with the session's own `pet_in`
+        report is the only source of a duration at all. One query for a whole
+        page of visits rather than one per visit — the same shape
+        `query_timeline` uses for its media join.
+        """
+        if not related_events:
+            return {}
+        async with self._read() as session:
+            rows = await session.execute(
+                select(Event.related_event, func.min(Event.ts))
+                .where(Event.event_type == "pet_in",
+                      Event.related_event.in_(related_events))
+                .group_by(Event.related_event))
+            return {related: ts for related, ts in rows if ts is not None}
 
     # --- pets -------------------------------------------------------------
 

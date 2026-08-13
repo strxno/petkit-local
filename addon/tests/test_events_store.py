@@ -3,6 +3,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from sqlalchemy import text
+
 from petkit_local.events.store import EventStore
 
 
@@ -123,6 +125,75 @@ async def test_query_timeline_filters_by_device_and_window(event_store: EventSto
     rows = await event_store.query_timeline(device_id=1, start_ts=0, end_ts=200)
     assert len(rows) == 1
     assert rows[0]["event_type"] == "a"
+
+
+async def test_visit_summaries_excludes_mid_visit_samples(event_store: EventStore):
+    """A code "9" mid-visit weight sample shares its visit's related_event and
+    event_kind with the code "10" close-out, but must not itself be returned —
+    that is exactly the row `visit_summaries` exists to filter out."""
+    await event_store.upsert_event({"device_id": 1, "event_type": "9", "event_kind": "toilet_visit",
+                                    "related_event": "r1", "ts": 10.0})
+    await event_store.upsert_event({"device_id": 1, "event_type": "10", "event_kind": "toilet_visit",
+                                    "related_event": "r1", "ts": 20.0,
+                                    "content_json": '{"pet_weight": 4200}'})
+    rows = await event_store.visit_summaries(0, 1000)
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "10"
+    assert rows[0]["ts"] == 20.0
+
+
+async def test_visit_summaries_respects_the_window_and_device(event_store: EventStore):
+    await event_store.upsert_event({"device_id": 1, "event_type": "10", "event_kind": "toilet_visit",
+                                    "ts": 100.0})
+    await event_store.upsert_event({"device_id": 2, "event_type": "10", "event_kind": "toilet_visit",
+                                    "ts": 150.0})
+    await event_store.upsert_event({"device_id": 1, "event_type": "10", "event_kind": "toilet_visit",
+                                    "ts": 500.0})  # outside the window
+
+    rows = await event_store.visit_summaries(0, 200)
+    assert {r["ts"] for r in rows} == {100.0, 150.0}
+
+    rows_dev = await event_store.visit_summaries(0, 200, device_id=1)
+    assert {r["ts"] for r in rows_dev} == {100.0}
+
+
+async def test_visit_summaries_end_is_exclusive(event_store: EventStore):
+    await event_store.upsert_event({"device_id": 1, "event_type": "10", "event_kind": "toilet_visit",
+                                    "ts": 200.0})
+    assert await event_store.visit_summaries(0, 200) == []
+    assert len(await event_store.visit_summaries(0, 200.001)) == 1
+
+
+async def test_visit_summaries_never_returns_state_json(event_store: EventStore):
+    """Explicit column selection, not `select(Event)` — `state_json` is the
+    single biggest thing in a row and nothing consuming a visit summary reads
+    it, so it must never even reach this query's result."""
+    await event_store.upsert_event({"device_id": 1, "event_type": "10", "event_kind": "toilet_visit",
+                                    "ts": 100.0, "state_json": '{"heavy": "payload"}'})
+    rows = await event_store.visit_summaries(0, 1000)
+    assert "state_json" not in rows[0]
+
+
+async def test_visit_summaries_ignores_non_toilet_events(event_store: EventStore):
+    await event_store.upsert_event({"device_id": 1, "event_type": "10", "event_kind": "cleaning",
+                                    "ts": 100.0})
+    assert await event_store.visit_summaries(0, 1000) == []
+
+
+async def test_pet_in_starts_pairs_by_related_event(event_store: EventStore):
+    await event_store.upsert_event({"device_id": 1, "event_type": "pet_in",
+                                    "related_event": "r1", "ts": 100.0})
+    # A second, later pet_in report for the SAME visit — the earliest must win.
+    await event_store.upsert_event({"device_id": 1, "event_type": "pet_in",
+                                    "related_event": "r1", "ts": 110.0})
+    await event_store.upsert_event({"device_id": 1, "event_type": "pet_in",
+                                    "related_event": "r2", "ts": 500.0})
+    starts = await event_store.pet_in_starts(["r1", "r2", "r3-not-present"])
+    assert starts == {"r1": 100.0, "r2": 500.0}
+
+
+async def test_pet_in_starts_empty_input_makes_no_query(event_store: EventStore):
+    assert await event_store.pet_in_starts([]) == {}
 
 
 async def test_media_for_retention_and_delete(event_store: EventStore):
@@ -289,6 +360,29 @@ async def test_migrate_adds_columns_to_an_existing_database_in_place():
         assert (await store.get_event(events[0]["id"]))["parent_event"] == "p1"
         assert (await store.get_media_by_file_id("f1"))["stitch_state"] == "failed"
         await store.close()
+
+
+async def test_migrate_adds_the_kind_ts_index_to_an_existing_database():
+    """A `create_all`-only mechanism would reach a brand-new database and
+    never an existing one — exactly backwards from who needs the index. This
+    pins the old-schema fixture (which has no such index) picking it up."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "petkit.db"
+        old = sqlite3.connect(str(path))
+        old.executescript(_OLD_SCHEMA)
+        old.commit()
+        old.close()
+
+        store = EventStore(path)
+        await store.connect()
+        try:
+            async with store._read() as session:
+                rows = (await session.execute(
+                    text("PRAGMA index_list(events)"))).fetchall()
+            names = {row[1] for row in rows}
+            assert "idx_events_kind_ts" in names
+        finally:
+            await store.close()
 
 
 async def test_opens_the_intended_file_when_the_path_needs_url_escaping():
