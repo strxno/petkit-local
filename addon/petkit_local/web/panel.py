@@ -57,6 +57,7 @@ from petkit_local.web.api.devices import (
     api_device_log_settings, api_timezone,
     api_devices, api_send_command,
 )
+from petkit_local.web.api.insights import api_insights
 from petkit_local.web.api.logs import (
     api_capture_delete, api_capture_download, api_capture_list, api_capture_read,
     api_device_log_read, api_device_logs, api_events, api_ws,
@@ -267,6 +268,9 @@ def create_panel_app(registry: DeviceRegistry, ble_registry: BLERegistry | None,
     app.router.add_get("/api/timeline/{id}", api_event_detail)
     app.router.add_get("/api/media/thumb/{path:.*}", api_media_thumb)
     app.router.add_get("/api/media/{path:.*}", api_media_file)
+
+    # --- insights ---
+    app.router.add_get("/api/insights", api_insights)
 
     # --- pets ---
     app.router.add_get("/api/pets", api_pets_list_create)
