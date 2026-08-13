@@ -5,7 +5,7 @@ recognition) is never overridden and this module never returns
 `grade=CONFIRMED` itself — see ai/weight.py's module docstring for why.
 """
 from petkit_local.ai.weight import (
-    Attribution, WeightProfile, attribute, attribute_visit, band,
+    WeightProfile, attribute, attribute_visit, band,
     build_profiles, corroborated,
 )
 from petkit_local.events import codes
@@ -98,12 +98,10 @@ def test_weight_path_never_returns_confirmed():
 
 def test_tolerance_is_relative_with_an_absolute_floor():
     # A small cat: 8% of 900g is 72g, below the 100g floor -> floor wins.
-    small = WeightProfile(pet_id=1, weight_g=900.0, device_ids=frozenset(), corroborated=True)
     lo, hi = band(900.0)
     assert (lo, hi) == (800.0, 1000.0)
 
     # A large cat: 8% of 7000g is 560g, above the floor -> relative wins.
-    large = WeightProfile(pet_id=2, weight_g=7000.0, device_ids=frozenset(), corroborated=True)
     lo2, hi2 = band(7000.0)
     assert (lo2, hi2) == (6440.0, 7560.0)
 

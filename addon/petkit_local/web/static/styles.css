@@ -15,6 +15,7 @@
  *   AI / PETS     the pet list, its mugshots and the face cropper
  *   LOG           the live traffic view and the device-log viewer
  *   TIMELINE      the day view, its time gutter and media tiles
+ *   INSIGHTS      the hand-rolled SVG charts and their controls/legend
  *   MODAL         the media lightbox
  *   RESPONSIVE    the narrow-screen overrides that are not inline above
  *   HELP          the `?` popover, parented to <body>
@@ -41,6 +42,18 @@
   --ok: #16a34a;
   --bad: #ef4444;
   --warn: #f59e0b;
+  /* A small categorical palette for the Insights charts (`charts.js`,
+     `insights.js`), cycled per pet by index. ONE definition, not split across
+     the light/dark media query below like `--bg`/`--fg` are: these sit on
+     bars and points against either background, not as the background
+     itself, and mid-saturation hues at this lightness stay legible on both
+     `--card: #fff` and `--card: #1a1e24` without a second set of values. */
+  --pet-1: #2563eb;
+  --pet-2: #ea580c;
+  --pet-3: #16a34a;
+  --pet-4: #9333ea;
+  --pet-5: #db2777;
+  --pet-6: #0891b2;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -1748,6 +1761,48 @@ table.tl-dbgt td:first-child {
 .tl-grade.unverified {
   background: rgba(239, 68, 68, 0.16);
   color: var(--bad);
+}
+/* ==== INSIGHTS ==== */
+/* Hand-rolled SVG (`static/js/charts.js`) rather than a canvas library, so
+   every mark below is styled the same way the rest of the panel is: CSS
+   custom properties, themed for free by the TOKENS block above. `viewBox` +
+   this rule is the whole responsiveness story — no resize listener. */
+.insight-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.chart-grid line,
+.chart-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.chart-grid text,
+.chart-xlabel {
+  fill: var(--mut);
+  font-size: 10px;
+}
+.chart-rowlabel {
+  fill: var(--fg);
+  font-size: 11px;
+}
+/* Only the weight histogram's bars carry `chart-bucket-click` — a scatter
+   point or an hour-strip bar has nothing to do on click, so the pointer
+   cursor is scoped to the action rather than to every `.chart-mark`, which
+   would advertise an affordance the other charts don't have. */
+[data-action='chart-bucket-click'] {
+  cursor: pointer;
+}
+/* The small colour dot beside a pet's name in the legend and its chip —
+   the same swatch a mugshot would occupy, for a pet with no photo yet. */
+.chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: -1px;
+  flex: none;
 }
 /* ==== MODAL ==== */
 .modal {
