@@ -861,6 +861,25 @@ a:hover {
   padding: 1px 6px;
   min-width: 140px;
 }
+/* Same editable-text treatment as .pet-name, sized down: this is a secondary
+   fact about the pet, not its headline. */
+.pet-weight {
+  font-size: 13px;
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+}
+.pet-weight:hover {
+  border-bottom-color: var(--mut);
+}
+.pet-weight-edit {
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  width: 70px;
+}
 .pet-devs {
   flex: 1;
   display: flex;
