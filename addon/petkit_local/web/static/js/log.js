@@ -2,7 +2,40 @@ import { BASE, api, esc, toast, fmtTs, fmtBytes, copyText } from './core.js';
 import { onAction, onChange, onInput } from './delegate.js';
 
 // ---------------- Live log ----------------
-const LOG = { rows: [] };
+const LOG = { rows: [], device: '' };
+const logDevices = new Map();
+
+function updateLogDevices() {
+  const pick = document.getElementById('logDevice');
+  if (!pick) return;
+  pick.innerHTML =
+    '<option value="">All devices</option>' +
+    [...logDevices]
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(([id, name]) => `<option value="${esc(id)}">${esc(name)} #${esc(id)}</option>`)
+      .join('');
+  pick.value = LOG.device;
+}
+
+function matchesLogDevice(e) {
+  return !LOG.device || (e.device_id != null && String(e.device_id) === LOG.device);
+}
+
+onChange('log-device', el => {
+  LOG.device = el.value;
+  const view = document.getElementById('logView');
+  [...view.children].forEach((node, i) => {
+    node.style.display = matchesLogDevice(LOG.rows[i]) ? '' : 'none';
+  });
+  showLogCount();
+});
+
+api('devices')
+  .then(devices => {
+    for (const d of devices) logDevices.set(String(d.id), d.name || d.type || 'Device');
+    updateLogDevices();
+  })
+  .catch(() => {});
 function logDetailText(dt) {
   // Not every log entry is an HTTP exchange — a redaction detail has no method
   // or status, and rendering "undefined undefined → undefined" for it is worse
@@ -85,7 +118,7 @@ function makeLogNode(e) {
   const hb = isHeartbeat(e);
   const dt = e.detail ? logDetailText(e.detail) : '';
   return (
-    `<div class="l ${dt ? 'exp' : ''}" data-hb="${hb ? 1 : 0}"${dt ? ' data-action="toggle-log"' : ''}>` +
+    `<div class="l ${dt ? 'exp' : ''}" style="${matchesLogDevice(e) ? '' : 'display:none'}" data-hb="${hb ? 1 : 0}"${dt ? ' data-action="toggle-log"' : ''}>` +
     `<div class="lh"><span class="mut">${fmtTs(e.ts)}</span><span class="k ${esc(e.kind)}">${esc(e.kind)}</span>` +
     `${e.device_id != null ? `<span class="mut">#${esc(e.device_id)}</span>` : ''}<span class="lsum">${esc(e.summary)}</span>` +
     // Inside the row, which also carries data-action="toggle-log". `delegate`
@@ -121,6 +154,11 @@ const LOG_CAP = 600;
 function showLogCount() {
   const el = document.getElementById('logCount');
   if (!el) return;
+  if (LOG.device) {
+    const hideHb = document.getElementById('hideHb').checked;
+    el.textContent = `${LOG.rows.filter(e => matchesLogDevice(e) && !(hideHb && isHeartbeat(e))).length} matching entries / ${LOG.rows.length} buffered`;
+    return;
+  }
   el.textContent = !LOG.rows.length
     ? ''
     : LOG.rows.length >= LOG_CAP
@@ -130,6 +168,10 @@ function showLogCount() {
 
 function pushLog(e) {
   if (e.kind === 'ping') return;
+  if (e.device_id != null && !logDevices.has(String(e.device_id))) {
+    logDevices.set(String(e.device_id), 'Device');
+    updateLogDevices();
+  }
   LOG.rows.push(e);
   if (LOG.rows.length > LOG_CAP) LOG.rows.shift();
   const v = document.getElementById('logView');
@@ -155,7 +197,7 @@ onAction('clear-log', () => clearLog());
 // silently ignored.
 function downloadLog() {
   const hideHb = document.getElementById('hideHb').checked;
-  const rows = LOG.rows.filter(e => !(hideHb && isHeartbeat(e)));
+  const rows = LOG.rows.filter(e => matchesLogDevice(e) && !(hideHb && isHeartbeat(e)));
   if (!rows.length) return toast('Nothing to download yet');
   const text = rows
     .map(e => {
@@ -176,9 +218,10 @@ function downloadLog() {
   toast(`Saved ${rows.length} rows`);
 }
 onAction('download-log', () => downloadLog());
-document
-  .getElementById('hideHb')
-  .addEventListener('change', e => document.body.classList.toggle('hidehb', e.target.checked));
+document.getElementById('hideHb').addEventListener('change', e => {
+  document.body.classList.toggle('hidehb', e.target.checked);
+  showLogCount();
+});
 document.body.classList.toggle('hidehb', document.getElementById('hideHb').checked);
 
 // ---------------- Device logs (uploaded by the device itself) ----------------
