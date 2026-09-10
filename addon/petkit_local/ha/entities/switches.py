@@ -215,28 +215,28 @@ FOUNTAIN_W7H_SWITCHES = [
               value_path="settings.lightMode", icon="mdi:lightbulb"),
     EntityDef(component="switch", key="auto_refill", name="Auto Refill",
               value_path="settings.addWaterSwitch", icon="mdi:water-plus"),
-    EntityDef(component="switch", key="pet_detection", name="Pet Detection",
+    EntityDef(component="switch", key="pet_detection", name="Pet Appearance Detection",
               value_path="settings.petDetection", icon="mdi:cat"),
     # W7H variant option, gated by heatInstall in ha/categories.py.
     EntityDef(component="switch", key="heater", name="Heater",
               value_path="settings.heaterSwitch", icon="mdi:thermometer"),
-    EntityDef(component="switch", key="drink_detection", name="Drink Detection",
+    EntityDef(component="switch", key="drink_detection", name="Drinking Detection",
               value_path="settings.drinkDetection", icon="mdi:cup-water"),
-    EntityDef(component="switch", key="vomit_detection", name="Vomit Detection",
+    EntityDef(component="switch", key="vomit_detection", name="AI Vomit Detection",
               value_path="settings.vomitDetection", icon="mdi:emoticon-sick"),
-    EntityDef(component="switch", key="auto_flush", name="Auto Flush",
+    EntityDef(component="switch", key="auto_flush", name="Auto Drain & Flush",
               value_path="settings.autoFlush", icon="mdi:water-sync"),
-    EntityDef(component="switch", key="auto_water_change", name="Auto Water Change",
+    EntityDef(component="switch", key="auto_water_change", name="Auto Drain & Refill",
               value_path="settings.autoWaterChange", icon="mdi:water-refresh"),
     # Status-light toggles, siblings of the `indicator_light` switch this file
     # already ships for `lightMode`.
-    EntityDef(component="switch", key="clean_water_lack_light", name="Low Water Light",
+    EntityDef(component="switch", key="clean_water_lack_light", name="Clean Water Tank Low Alarm Light",
               value_path="settings.cleanWaterLackLight", icon="mdi:lightbulb-alert",
               entity_category="config"),
-    EntityDef(component="switch", key="clean_water_empty_light", name="Empty Water Light",
+    EntityDef(component="switch", key="clean_water_empty_light", name="Clean Water Tank Empty Alarm Light",
               value_path="settings.cleanWaterEmptyLight", icon="mdi:lightbulb-alert",
               entity_category="config"),
-    EntityDef(component="switch", key="waste_water_full_light", name="Waste Full Light",
+    EntityDef(component="switch", key="waste_water_full_light", name="Waste Water Tank Full Alarm Light",
               value_path="settings.wasteWaterFullLight", icon="mdi:lightbulb-alert",
               entity_category="config"),
     EntityDef(component="switch", key="wifi_light_assist", name="WiFi Status Light",
@@ -244,10 +244,10 @@ FOUNTAIN_W7H_SWITCHES = [
               entity_category="config"),
     # Do-not-disturb for two specific subsystems, alongside the general
     # `disturb_mode` switch above.
-    EntityDef(component="switch", key="refill_disturb_mode", name="Quiet Refill",
+    EntityDef(component="switch", key="refill_disturb_mode", name="Auto-refill Do Not Disturb",
               value_path="settings.awDisturbMode", icon="mdi:bell-off",
               entity_category="config"),
-    EntityDef(component="switch", key="water_level_disturb_mode", name="Quiet Water Level Alerts",
+    EntityDef(component="switch", key="water_level_disturb_mode", name="Alarm Lights Do Not Disturb",
               value_path="settings.wlDisturbMode", icon="mdi:bell-off",
               entity_category="config"),
 ]
@@ -294,7 +294,7 @@ FOUNTAIN_W7H_CAMERA_SWITCHES = [
     # `refill_disturb_mode` (awDisturbMode) and `water_level_disturb_mode`
     # (wlDisturbMode) above. The map is explicit that they are separate despite
     # near-identical UI labels: this one mutes the device.
-    EntityDef(component="switch", key="voice_disturb_mode", name="Quiet Voice Prompts",
+    EntityDef(component="switch", key="voice_disturb_mode", name="Voice Do Not Disturb",
               value_path="settings.toneMode", icon="mdi:bell-off",
               entity_category="config"),
 ]

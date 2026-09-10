@@ -257,15 +257,12 @@ def schedule_targets(device: Device) -> list[dict[str, Any]]:
     labels = {
         "lightMultiRange": "Screen Period" if device.is_litter else "Indicator Light Period",
         "distrubMultiRange": "Cleaning Do Not Disturb",
-        "toneMultiRange": "Voice Undisturbed Period",
+        "toneMultiRange": "Voice Quiet Period",
         "cameraMultiRange": "Shooting Period",
         "cameraMultiNew": "Shooting Period",
         "detectMultiRange": "Detection Period",
-        # `aw` is addWater, from the firmware's own vocabulary. `wl` is NOT
-        # resolved -- the image holds three `wl` tokens and none of them says
-        # what it abbreviates -- so the label stays the wire name rather than
-        # inventing a friendly one that might be wrong.
-        "awDisturbMultiRange": "Water Top-Up Undisturbed Period",
+        # W7H app mapping: independent auto-refill and alarm-light quiet hours.
+        "awDisturbMultiRange": "Auto-refill Quiet Period",
         "wlDisturbMultiRange": "Alarm Lights Quiet Period",
     }
     weekly = {"cameraMultiRange", "cameraMultiNew"}

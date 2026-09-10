@@ -281,15 +281,15 @@ function renderSchedules(d, sectionEntities) {
       else body = renderFeedEditor(d.id, t, value);
       if (t.target === 'toneMultiRange')
         body =
-          '<p class="sub">Voice is muted during these periods when Quiet Voice Prompts is on. For audio all day, turn Voice Prompt on and Quiet Voice Prompts off.</p>' +
+          '<p class="sub">Voice is muted during these periods when Voice Do Not Disturb is on. For audio all day, turn Voice Prompt on and Voice Do Not Disturb off.</p>' +
           body;
       if (t.target === 'awDisturbMultiRange')
         body =
-          '<p class="sub">Automatic refill is blocked during these periods when Quiet Refill is on. An empty list adds no quiet hours.</p>' +
+          '<p class="sub">Automatic refill is blocked during these periods when Auto-refill Do Not Disturb is on. An empty list adds no quiet hours.</p>' +
           body;
       if (t.target === 'wlDisturbMultiRange')
         body =
-          '<p class="sub">Alarm lights are suppressed during these periods when Quiet Water Level Alerts is on.</p>' +
+          '<p class="sub">Alarm lights are suppressed during these periods when Alarm Lights Do Not Disturb is on.</p>' +
           body;
       // Save appears only once there is something to save. Five permanent Save
       // buttons in one card read as five things demanding attention; a button
