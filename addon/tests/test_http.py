@@ -343,6 +343,40 @@ async def test_heartbeat_clears_mqtt_flag_when_device_reports_no_session():
         await client.close()
 
 
+async def test_w7h_lagging_zero_does_not_override_live_session():
+    reg = DeviceRegistry()
+    client = await _client(reg)
+    try:
+        await client.post("/6/t5/dev_signup", headers=HDR)
+        dev = reg.get(100)
+        dev.mqtt_connected = True
+        dev.mqtt_connected_at = time.time() - 23
+        dev.mqtt_session_alive = lambda: True
+        await client.get("/6/poll/t5/heartbeat?iotStatus=0", headers=HDR)
+        assert dev.mqtt_connected
+        dev.mqtt_session_alive = lambda: False
+        await client.get("/6/poll/t5/heartbeat?iotStatus=0", headers=HDR)
+        assert not dev.mqtt_connected
+    finally:
+        await client.close()
+
+
+async def test_heartbeat_delivers_durable_settings_after_restart():
+    reg = DeviceRegistry()
+    client = await _client(reg)
+    try:
+        await client.post("/6/t5/dev_signup", headers=HDR)
+        dev = reg.get(100)
+        dev.config["pending_settings"] = {"toneMode": 0}
+        assert not dev.command_queue
+        response = await client.get("/6/poll/t5/heartbeat", headers=HDR)
+        result = (await response.json())["result"]
+        assert "toneMode" in result[0]["content"]
+        assert dev.config["pending_settings"] == {}
+    finally:
+        await client.close()
+
+
 async def test_heartbeat_ignores_an_iot_status_that_lags_the_connect():
     """The device samples iotStatus before it sends the poll, so a heartbeat
     already in flight when the session came up reports the state from just

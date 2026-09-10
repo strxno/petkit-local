@@ -273,90 +273,26 @@ CATEGORY_SPECS: dict[str, CategorySpec] = {
             })),
         ),
     ),
-    # Of the five fountain codenames, only `w7h` can ever reach this table: the
-    # other four have no WiFi (`utils/const.py::DEVICE_TYPES_BLE_ONLY`) and
-    # therefore never become a `Device` at all. Their shared entity lists are
-    # kept rather than deleted — they are what a fountain with WiFi would
-    # publish, and PetKit could ship one — but nothing has filled them and
-    # nothing will until such a fountain turns up. Treat their field names as
-    # cloud-API guesses, not as anything a device has been seen to send.
     "fountain": CategorySpec(
-        device_types=frozenset(DEVICE_TYPES_WATER_FOUNTAIN),
-        entities=(
-            *FOUNTAIN_SENSORS,
-            *FOUNTAIN_BINARY_SENSORS,
-            *FOUNTAIN_SWITCHES,
-            *FOUNTAIN_BUTTONS,
-            *FOUNTAIN_NUMBERS,
-            *FOUNTAIN_SELECTS,
-        ),
-        # No fountain-specific camera switches exist; the W7H publishes only
-        # the common bundle.
+        device_types=frozenset(DEVICE_TYPES_WATER_FOUNTAIN - {"w7h"}),
+        entities=(*FOUNTAIN_SENSORS, *FOUNTAIN_BINARY_SENSORS,
+                  *FOUNTAIN_SWITCHES, *FOUNTAIN_BUTTONS,
+                  *FOUNTAIN_NUMBERS, *FOUNTAIN_SELECTS),
+        state_topics=("drink_start", "drink_over", "property/post", "data_get/post"),
+    ),
+    # W7H is a standalone WiFi device, not a BLE fountain with extra controls.
+    "w7h": CategorySpec(
+        device_types=frozenset({"w7h"}),
+        entities=(*FOUNTAIN_W7H_SENSORS, *FOUNTAIN_W7H_BINARY_SENSORS,
+                  *FOUNTAIN_W7H_HALL_SENSORS, *FOUNTAIN_W7H_SWITCHES,
+                  *FOUNTAIN_W7H_BUTTONS, *FOUNTAIN_W7H_EVENTS,
+                  *FOUNTAIN_W7H_CAMERA_SWITCHES, *FOUNTAIN_W7H_NUMBERS,
+                  *FOUNTAIN_W7H_SELECTS, *FOUNTAIN_W7H_TIMES),
         camera_entities=_COMMON_CAMERA_ENTITIES,
-        state_topics=("drink_start", "drink_over",
-                      "property/post", "data_get/post"),
-        # A real W7H sends all three (capture 2026-07-31), and it is the only
-        # fountain with a camera, so they belong on the camera bundle rather
-        # than the shared list.
+        state_topics=("drink_start", "drink_over", "property/post", "data_get/post",
+                      "work_start", "add_water_over"),
         camera_state_topics=("pet_detect", "pet_discern"),
-        model_entities=(
-            ("w7h", (*FOUNTAIN_W7H_SENSORS, *FOUNTAIN_W7H_BINARY_SENSORS,
-                     *FOUNTAIN_W7H_HALL_SENSORS, *FOUNTAIN_W7H_SWITCHES,
-                     *FOUNTAIN_W7H_BUTTONS, *FOUNTAIN_W7H_EVENTS,
-                     # The camera, voice and water-treatment settings. They are
-                     # here rather than on `camera_entities` because no other
-                     # fountain has a camera to configure: every remaining
-                     # EverSweet codename is Bluetooth-only and never becomes a
-                     # Device at all.
-                     *FOUNTAIN_W7H_CAMERA_SWITCHES, *FOUNTAIN_W7H_NUMBERS,
-                     *FOUNTAIN_W7H_SELECTS, *FOUNTAIN_W7H_TIMES)),
-        ),
-        # The water-treatment jobs. A live W7H sent `work_start` (2026-08-01)
-        # and `add_water_over` a second after a `drink_start`; neither is a
-        # thing any other EverSweet does, so neither belongs on the shared list.
-        model_state_topics=(
-            ("w7h", ("work_start", "add_water_over")),
-        ),
-        # Everything the W7H cannot fill. The list above is what it reports
-        # instead; between the two, the fountain family covers both hardware
-        # generations without either pretending to be the other.
-        #
-        # Evidence for each exclusion is one real `property/post` (2026-07-31)
-        # plus the reverse-engineered field map for the same firmware: the
-        # payload carries 42 keys and not one of these is among them. Their
-        # names come from the reference integration's CLOUD model, which is
-        # PetKit's account-side view of the Bluetooth fountains — a different
-        # device generation, not a different spelling.
-        model_excludes=(
-            ("w7h", frozenset({
-                # No `workState` in the payload at all. Publishing it meant a
-                # Device Status of 0, which the device never sent and which
-                # decodes as a real mode.
-                "device_status",
-                # No filter and no battery in this hardware.
-                "filter_percent", "filter_days", "battery", "low_battery",
-                "replace_filter", "reset_filter",
-                # Not reported. The W7H says the same things with `cwtState`,
-                # the clean-tank halls and its `err{}` bits.
-                "water_lack",
-                # `detectStatus` is absent; presence arrives as `pet_detect`
-                # events and the `lastPetDetect` timestamp instead.
-                "pet_detected",
-                # `drinkTime` here is a TIMESTAMP under `device{}`, not the
-                # count this sensor renders. Replaced by `last_drink`.
-                "drink_times",
-                # Both wrote `power` through `property.set`, and `power` is not
-                # among that firmware's set handlers — so they were writing a
-                # field nothing reads.
-                #
-                # It is a SERVICE, though: `parse_service_invoke_msg` accepts
-                # `type: "power"` with a `power_action` of 0 or 1. That is the
-                # device off and on, not a running job paused, so these two
-                # stay excluded; what replaced them are the three job buttons
-                # in `FOUNTAIN_W7H_BUTTONS`, which use the `start` service.
-                "pause_fountain", "resume_fountain",
-            })),
-        ),
+        model_excludes=(("w7h", frozenset({"device_status", "pet_detected"})),),
     ),
     "purifier": CategorySpec(
         device_types=frozenset(DEVICE_TYPES_PURIFIER),
@@ -394,8 +330,11 @@ def get_entities_for_device(device: Device) -> list[EntityDef]:
     spec = spec_for_device(device)
     if spec is None:
         return []
-    return spec.entities_for(has_camera=device.is_camera,
-                             device_type=device.device_type)
+    entities = spec.entities_for(has_camera=device.is_camera,
+                                 device_type=device.device_type)
+    if device.device_type == "w7h" and device.state.get("heatInstall") not in (1, "1"):
+        entities = [e for e in entities if e.key != "heater"]
+    return entities
 
 
 def get_setting_fields(device: Device) -> set[str]:

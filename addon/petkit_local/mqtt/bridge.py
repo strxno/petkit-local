@@ -25,12 +25,15 @@ than failing.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterable
 
 from petkit_local.devices import payloads
+from petkit_local.devices.pending import KEY, completed
+from petkit_local.ha.commands import make_mqtt_property_set
 from petkit_local.devices.registry import DeviceRegistry
 from petkit_local.devices.state_parsers import apply_consumable_state, normalize_property_params
 from petkit_local.ha.categories import get_setting_fields
@@ -270,11 +273,16 @@ class MQTTBridge:
                                  broker_host, broker_port)
 
                         await client.subscribe("#")
+                        recovery = asyncio.create_task(self._recover_settings())
 
                         # aiomqtt signals a lost connection by raising MqttError
                         # out of the message iterator — that one must reach the
                         # handler below, unlike a per-message failure.
-                        await self._consume(client.messages, (aiomqtt.MqttError,))
+                        try:
+                            await self._consume(client.messages, (aiomqtt.MqttError,))
+                        finally:
+                            recovery.cancel()
+                            await asyncio.gather(recovery, return_exceptions=True)
                     finally:
                         self._client = None
 
@@ -282,6 +290,23 @@ class MQTTBridge:
                 log.warning("MQTT bridge connection lost (%s), reconnecting in %ds...",
                             e, RECONNECT_DELAY_SECONDS)
                 await asyncio.sleep(RECONNECT_DELAY_SECONDS)
+
+    async def _recover_settings(self) -> None:
+        while True:
+            for device in self._registry.all():
+                async with device.settings_delivery_lock:
+                    pending = deepcopy(device.config.get(KEY, {}))
+                    if not pending or not device.mqtt_connected:
+                        continue
+                    try:
+                        await self.publish_to_device(
+                            device, "property/set", make_mqtt_property_set(pending))
+                    except Exception:
+                        log.exception("Pending settings send failed for %d", device.petkit_id)
+                        continue
+                    completed(device, pending)
+                    self._registry.save()
+            await asyncio.sleep(2)
 
     async def _consume(self, messages: AsyncIterable[Any],
                        fatal: tuple[type[BaseException], ...] = ()) -> None:

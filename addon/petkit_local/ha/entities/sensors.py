@@ -376,6 +376,12 @@ FOUNTAIN_BINARY_SENSORS = [
 # somebody actually looks at.
 
 FOUNTAIN_W7H_SENSORS = [
+    EntityDef(component="sensor", key="error", name="Error",
+              value_path="state.errorMsg", icon="mdi:alert-circle"),
+    EntityDef(component="sensor", key="rssi", name="WiFi Signal",
+              value_path="state.rssi", device_class="signal_strength", unit="dBm"),
+    EntityDef(component="sensor", key="temperature", name="Water Temperature",
+              value_path="state.heatRealTemp", device_class="temperature", unit="°C"),
     # Timestamps, not counters. `drink_time` is when the pet last drank; the
     # map is explicit about it, and reading it as a count is how it nearly
     # ended up behind a "Drink Times" sensor showing 1785531049.

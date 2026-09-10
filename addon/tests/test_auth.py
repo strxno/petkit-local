@@ -216,8 +216,12 @@ async def test_packet_from_a_live_session_stamps_liveness():
     await plugin.authenticate(session=s)
 
     dev.last_mqtt = 0.0
+    dev.mqtt_connected = False
+    s.transitions = type("Transitions", (), {"state": "connected"})()
     await plugin.on_mqtt_packet_received(packet=object(), session=s)
     assert dev.last_mqtt > 0
+    assert dev.mqtt_connected
+    assert dev.mqtt_session_alive()
 
 
 async def test_packet_from_the_bridge_stamps_nothing():

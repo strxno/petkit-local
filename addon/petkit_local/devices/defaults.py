@@ -159,6 +159,9 @@ def default_settings(device: Device) -> dict[str, Any]:
                 "feedPicture": 1, "eatVideo": 1, "upload": 1,
             })
         return base
+    if device.device_type == "w7h":
+        return {"manualLock": 0, "lightMode": 0,
+                "addWaterSwitch": 0, "petDetection": 0, "heaterSwitch": 0}
     if device.is_water_fountain:
         return {
             "manualLock": 0, "lightMode": 0, "disturbMode": 0,
@@ -224,22 +227,9 @@ def multi_config_ranges(device: Device) -> dict[str, Any]:
         # `cameraMultiNew` flips `cameraStatus` to 1 and recording resumes.
         keys = ("detectMultiRange", "cameraMultiNew",
                 "toneMultiRange", "lightMultiRange")
-    elif device.is_water_fountain:
-        # Nine of these exist in the W7-262863 image; SEVEN are sent.
-        #
-        # Five are confirmed by watching PetKit's own cloud write them to a
-        # W7H (capture 2026-08-11): `lightMultiRange`, `toneMultiRange`,
-        # `awDisturbMultiRange`, `wlDisturbMultiRange`, `cameraMultiRange`.
-        # `distrubMultiRange` and `detectMultiRange` are in the firmware's
-        # string table and default to something that restricts nothing, so
-        # sending them takes no decision away from the owner.
-        #
-        # `lightAssistMultiRange` and `wifiLightAssistMultiRange` are held
-        # back deliberately. They are real fields, but no capture shows a
-        # value, and this reply is re-sent on every poll — an invented window
-        # would overwrite whatever the owner set in PetKit's app, on repeat.
-        keys = ("lightMultiRange", "toneMultiRange", "distrubMultiRange",
-                "detectMultiRange", "cameraMultiRange",
+    elif device.device_type == "w7h":
+        # Only the five W7H periods mapped from app writes are exposed.
+        keys = ("lightMultiRange", "toneMultiRange", "cameraMultiRange",
                 "awDisturbMultiRange", "wlDisturbMultiRange")
     return {key: pick(key) for key in keys}
 
@@ -262,10 +252,7 @@ def schedule_targets(device: Device) -> list[dict[str, Any]]:
         Raw-only: `it` was an empty list in every capture and nothing here
         is going to guess what a meal item looks like.
 
-    A W7H has five of these and gets none of them yet. Its `ctrl` reads them
-    and the app writes them, but the `dev_multi_config` branch that would
-    serve them back is PR #18's — offering an editor for a schedule this
-    add-on cannot answer with would be the confusing half of the feature.
+    W7H uses its own five capture-mapped periods, independent of BLE fountains.
     """
     labels = {
         "lightMultiRange": "Screen Period" if device.is_litter else "Indicator Light Period",
@@ -279,7 +266,7 @@ def schedule_targets(device: Device) -> list[dict[str, Any]]:
         # what it abbreviates -- so the label stays the wire name rather than
         # inventing a friendly one that might be wrong.
         "awDisturbMultiRange": "Water Top-Up Undisturbed Period",
-        "wlDisturbMultiRange": "wlDisturb Undisturbed Period",
+        "wlDisturbMultiRange": "Alarm Lights Quiet Period",
     }
     weekly = {"cameraMultiRange", "cameraMultiNew"}
 

@@ -24,6 +24,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from amqtt.mqtt.constants import QOS_0
+from amqtt.mqtt.packet import DISCONNECT
 from amqtt.plugins.base import BaseAuthPlugin
 
 from petkit_local.mqtt.topics import downstream_filters
@@ -267,6 +268,12 @@ class AliyunAuthPlugin(BaseAuthPlugin):
         # happened to ask for.
         device.mqtt_subscriptions = []
         self._live_sessions[device.petkit_id] = session
+        device.mqtt_session_alive = lambda: (
+            self._live_sessions.get(device.petkit_id) is session
+            and getattr(getattr(session, "transitions", None), "state", None) == "connected"
+            and time.time() - device.last_mqtt < max(
+                15.0, float(getattr(session, "keep_alive", 0) or 0) * 1.5)
+        )
 
     def _device_for_client(self, client_id: str) -> Device | None:
         """Resolve a broker client id back to the device that owns it.
@@ -312,6 +319,12 @@ class AliyunAuthPlugin(BaseAuthPlugin):
                 device = self._registry.get(petkit_id) if self._registry else None
                 if device is not None:
                     device.last_mqtt = time.time()
+                    if (getattr(getattr(packet, "fixed_header", None), "packet_type", None) != DISCONNECT
+                            and getattr(getattr(session, "transitions", None), "state", None)
+                            == "connected" and not device.mqtt_connected):
+                        device.mqtt_connected = True
+                        log.info("Restored MQTT routing for device %d from its live session",
+                                 device.petkit_id)
                     self._note_subscriptions(device, packet)
                 return
 
@@ -374,7 +387,7 @@ class AliyunAuthPlugin(BaseAuthPlugin):
         set and leave a live device permanently on the slow path.
         """
         device = self._device_for_client(client_id)
-        if device is None or not device.mqtt_connected:
+        if device is None:
             return
         live = self._live_sessions.get(device.petkit_id)
         if client_session is not None and live is not None and live is not client_session:

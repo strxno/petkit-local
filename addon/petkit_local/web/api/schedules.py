@@ -249,7 +249,7 @@ async def api_save_schedule(request: web.Request) -> web.Response:
         }
         mqtt_cmd = make_mqtt_property_set(
             {"feed": json.dumps(wire, separators=(",", ":"))})
-        return await _deliver(hub, bridge, d, PROPERTY_SET_SUFFIX, mqtt_cmd)
+        return await _deliver(hub, bridge, d, PROPERTY_SET_SUFFIX, mqtt_cmd, registry=reg)
 
     cleaner = {"ranges": _clean_range_list, "weekly": _clean_weekly_list,
                "points": _clean_point_list}[kind]
@@ -267,7 +267,7 @@ async def api_save_schedule(request: web.Request) -> web.Response:
     reg.save()
 
     return await _deliver(hub, bridge, d, PROPERTY_SET_SUFFIX,
-                          make_mqtt_property_set(params))
+                          make_mqtt_property_set(params), registry=reg)
 
 
 async def api_deferred_feed(request: web.Request) -> web.Response:

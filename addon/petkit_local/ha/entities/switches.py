@@ -207,6 +207,19 @@ FOUNTAIN_SWITCHES = [
 # state is unknown until the device reports one. See `UNSEEDED_BY_DESIGN` in
 # tests/test_entity_backing.py.
 FOUNTAIN_W7H_SWITCHES = [
+    EntityDef(component="switch", key="disturb_mode", name="Do Not Disturb",
+              value_path="settings.disturbMode", icon="mdi:bell-off"),
+    EntityDef(component="switch", key="child_lock", name="Child Lock",
+              value_path="settings.manualLock", icon="mdi:lock"),
+    EntityDef(component="switch", key="indicator_light", name="Indicator Light",
+              value_path="settings.lightMode", icon="mdi:lightbulb"),
+    EntityDef(component="switch", key="auto_refill", name="Auto Refill",
+              value_path="settings.addWaterSwitch", icon="mdi:water-plus"),
+    EntityDef(component="switch", key="pet_detection", name="Pet Detection",
+              value_path="settings.petDetection", icon="mdi:cat"),
+    # W7H variant option, gated by heatInstall in ha/categories.py.
+    EntityDef(component="switch", key="heater", name="Heater",
+              value_path="settings.heaterSwitch", icon="mdi:thermometer"),
     EntityDef(component="switch", key="drink_detection", name="Drink Detection",
               value_path="settings.drinkDetection", icon="mdi:cup-water"),
     EntityDef(component="switch", key="vomit_detection", name="Vomit Detection",

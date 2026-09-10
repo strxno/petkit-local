@@ -9,6 +9,7 @@ and the per-category seed data those bodies fall back on in
 from __future__ import annotations
 
 import json
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -152,6 +153,9 @@ class Device:
     # (`patchers/common.py` queues the encoded form); the heartbeat handler
     # passes both through unchanged.
     command_queue: list[Any] = field(default_factory=list)
+    # Runtime-only broker predicate; never serialized with device config.
+    mqtt_session_alive: Any = field(default=None, repr=False, compare=False)
+    settings_delivery_lock: Any = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
     last_heartbeat: float = 0.0
     last_state_report: float = 0.0

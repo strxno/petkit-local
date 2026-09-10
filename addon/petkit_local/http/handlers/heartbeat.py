@@ -43,6 +43,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
+from petkit_local.devices.pending import KEY, completed
+from petkit_local.ha.commands import make_mqtt_property_set
 
 from petkit_local.http.handlers._common import request_device
 from petkit_local.utils.coerce import to_bool
@@ -186,8 +188,9 @@ def note_iot_status(device: Device, request: web.Request) -> None:
     device is on *a* broker; only a CONNECT we authenticated proves it is on
     *ours*, and in proxy mode the other answer is Aliyun's. So setting the flag
     stays with auth, and this is the half that can be believed on its own.
-    Clearing on a stale 0 costs little either: the command falls back to the
-    heartbeat queue, which is the path that always works.
+    A fresh authenticated session overrides a conflicting zero. W7H can stop
+    HTTP heartbeats immediately after that report, leaving queued commands
+    undeliverable. Auth also restores the flag on subsequent live packets.
 
     No await, and called before `pop_commands`, so it cannot come between the
     pop and the send (see this module's `carries_commands`).
@@ -197,6 +200,10 @@ def note_iot_status(device: Device, request: web.Request) -> None:
         return
     # Default True on an unparseable value: no news is not bad news.
     if to_bool(raw, True):
+        return
+    if device.mqtt_session_alive and device.mqtt_session_alive():
+        # W7H reported zero 23s after CONNECT while that session kept sending
+        # packets for days. Fresh authenticated broker traffic wins.
         return
     if time.time() - device.mqtt_connected_at < IOT_STATUS_GRACE:
         # Sampled before the session we just accepted; not evidence of a loss.
@@ -240,6 +247,17 @@ async def handle_heartbeat(request: web.Request) -> web.Response:
         note_iot_status(device, request)
 
         cmds = device.pop_commands()
+        pending = device.config.get(KEY, {})
+        if pending:
+            # Rebuild from the latest durable values, including after restart.
+            cmds = [c for c in cmds if not (
+                isinstance(c, dict) and c.get("method") == "thing.service.property.set"
+                and set(c.get("params", {})) <= set(pending))]
+            cmds.append(make_mqtt_property_set(dict(pending)))
+        for cmd in cmds:
+            if isinstance(cmd, dict) and cmd.get("method") == "thing.service.property.set":
+                completed(device, cmd.get("params", {}))
+                request.app["registry"].mark_dirty()
         if cmds:
             ts = int(time.time())
             result = []

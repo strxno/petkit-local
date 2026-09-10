@@ -18,6 +18,7 @@ from typing import Any
 from aiohttp import web
 
 from petkit_local.devices.base import Device, split_bucket_authority
+from petkit_local.devices.pending import completed, remember
 from petkit_local.http.proxy import resolve_upstream
 from petkit_local.utils.coerce import to_int
 
@@ -95,7 +96,13 @@ async def _json_body(request: web.Request) -> dict[str, Any]:
 
 
 async def _deliver(hub, bridge, d, suffix: str, envelope: Any,
-                   transport: str = "auto") -> web.Response:
+                   transport: str = "auto", registry=None) -> web.Response:
+    async with d.settings_delivery_lock:
+        return await _deliver_locked(hub, bridge, d, suffix, envelope, transport, registry)
+
+
+async def _deliver_locked(hub, bridge, d, suffix: str, envelope: Any,
+                          transport: str = "auto", registry=None) -> web.Response:
     """Send one already-built envelope, by whichever transport is live.
 
     Shared by every panel write rather than copied per endpoint: the fallback
@@ -103,6 +110,16 @@ async def _deliver(hub, bridge, d, suffix: str, envelope: Any,
     publish is not an error to the caller — the device picks the command up on
     its next poll either way — so `delivered` reports what actually happened.
     """
+    settings = (envelope.get("params") if isinstance(envelope, dict)
+                and envelope.get("method") == "thing.service.property.set" else None)
+    if isinstance(settings, dict):
+        allowed = set(d.config.get("settings", {})) | set(d.config.get("multi_config", {}))
+        settings = {k: v for k, v in settings.items() if k in allowed}
+    if settings:
+        remember(d, settings)
+        if registry is not None:
+            registry.save()
+
     if transport == "auto":
         mqtt_live = d.mqtt_connected and bridge is not None and getattr(bridge, "_client", None)
         transport = "mqtt" if mqtt_live else "heartbeat"
@@ -111,6 +128,10 @@ async def _deliver(hub, bridge, d, suffix: str, envelope: Any,
         try:
             await bridge.publish_to_device(d, suffix, envelope)
             delivered = "mqtt"
+            if isinstance(settings, dict):
+                completed(d, settings)
+                if registry is not None:
+                    registry.save()
         except Exception as e:
             log.warning("panel: MQTT publish failed for device %d, queuing for heartbeat: %s",
                         d.petkit_id, e)

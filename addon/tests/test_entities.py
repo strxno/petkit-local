@@ -8,6 +8,20 @@ VALID_COMPONENTS = {
     "event", "text", "image", "time",
 }
 
+
+def test_w7h_has_an_independent_control_set_and_optional_heater():
+    d = Device(device_type="w7h", petkit_id=1)
+    assert spec_for_device(d) is CATEGORY_SPECS["w7h"]
+    assert "w7h" not in CATEGORY_SPECS["fountain"].device_types
+    keys = {e.key for e in get_entities_for_device(d)}
+    assert "heater" not in keys
+    assert {"disturb_mode", "flow_mode", "fountain_time", "sleep_time"} <= keys
+    assert {"auto_refill", "child_lock", "indicator_light", "pet_detection"} <= keys
+    d.state["heatInstall"] = 1
+    assert "heater" in {e.key for e in get_entities_for_device(d)}
+    d.state["heatInstall"] = 0
+    assert "heater" not in {e.key for e in get_entities_for_device(d)}
+
 DEVICE_TYPES = ["t5", "t6", "t7", "t3", "t4", "d4h", "d4sh", "d3", "d4", "w7h", "w5", "k2", "k3"]
 
 # Golden entity counts per device type. An entity's identity in Home Assistant
@@ -66,14 +80,14 @@ EXPECTED_ENTITY_COUNTS = {
     # (feed_picture, eat_video, voice_prompt, voice_disturb_mode, disturb_mode)
     # and added selected_sound number + play_sound button. Net +6.
     "d4h": 57, "d4sh": 61,
-    "w4": 24, "w5": 24, "ctw2": 24, "ctw3": 24, "w7h": 84,
+    "w4": 24, "w5": 24, "ctw2": 24, "ctw3": 24, "w7h": 83,
     "k2": 12, "k3": 12,
 }
 
 # (non-camera model, camera model) of the same category. The camera bundle must
 # be APPENDED to the shared base, never interleaved, or the two models disagree
 # about entity order for no reason.
-CAMERA_PAIRS = [("t4", "t5"), ("d4", "d4h"), ("w5", "w7h")]
+CAMERA_PAIRS = [("t4", "t5"), ("d4", "d4h")]
 
 
 def test_all_components_are_valid_ha_platforms():

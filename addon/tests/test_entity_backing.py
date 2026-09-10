@@ -45,6 +45,8 @@ RUNTIME_DERIVED = {
 #: Each entry must name its evidence. Adding one without evidence defeats the
 #: whole test.
 UNSEEDED_BY_DESIGN = {
+    # W7H firmware fields: exposed explicitly without inventing owner settings.
+    "disturbMode", "fountainMode", "fountainTime", "sleepTime",
     # `feedSound` is seeded for camera feeders but not for non-camera ones
     # (d3, feeder, feedermini, d4, d4s) where the hardware is unconfirmed.
     "feedSound",

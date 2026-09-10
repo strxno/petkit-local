@@ -68,6 +68,10 @@ FOUNTAIN_SELECTS = [
 #: deliberately absent — a locale code is exactly the kind of thing that looks
 #: guessable ("de_DE"?) and is not.
 FOUNTAIN_W7H_SELECTS = [
+    EntityDef(component="select", key="flow_mode", name="Flow Mode",
+              value_path="settings.fountainMode", icon="mdi:water-pump",
+              options=["do_not_flow", "continuous", "intermittent", "motion_activated"],
+              option_values=[0, 1, 2, 3]),
     EntityDef(component="select", key="voice_language", name="Voice Language",
               value_path="settings.language", icon="mdi:translate",
               options=["English", "Chinese"],

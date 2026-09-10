@@ -42,11 +42,9 @@ const schedKey = (id, target) => id + ':' + target;
 const DAY_END = 1440;
 const isAllDay = pair => pair[0] === 0 && pair[1] === DAY_END;
 
-// The same sentence for every empty schedule. "Not set" on its own reads as a
-// gap somebody forgot to fill; the second half is the part that matters — this
-// app sets nothing for you, and unset means unrestricted, not broken.
-const SCHED_EMPTY =
-  '<p class="sub">Not set — nothing here restricts the device. Add a period to change that.</p>';
+// Empty active windows and empty quiet windows have opposite effects.
+// Keep the shared text neutral; describe quiet-mode semantics per target.
+const SCHED_EMPTY = '<p class="sub">No periods configured.</p>';
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const minToClock = m => {
@@ -281,6 +279,18 @@ function renderSchedules(d, sectionEntities) {
       else if (t.kind === 'weekly') body = renderWeeklyEditor(d.id, t, value);
       else if (t.kind === 'points') body = renderPointsEditor(d.id, t, value);
       else body = renderFeedEditor(d.id, t, value);
+      if (t.target === 'toneMultiRange')
+        body =
+          '<p class="sub">Voice is muted during these periods when Quiet Voice Prompts is on. For audio all day, turn Voice Prompt on and Quiet Voice Prompts off.</p>' +
+          body;
+      if (t.target === 'awDisturbMultiRange')
+        body =
+          '<p class="sub">Automatic refill is blocked during these periods when Quiet Refill is on. An empty list adds no quiet hours.</p>' +
+          body;
+      if (t.target === 'wlDisturbMultiRange')
+        body =
+          '<p class="sub">Alarm lights are suppressed during these periods when Quiet Water Level Alerts is on.</p>' +
+          body;
       // Save appears only once there is something to save. Five permanent Save
       // buttons in one card read as five things demanding attention; a button
       // that shows up when you have changed something reads as one.
@@ -298,8 +308,9 @@ function renderSchedules(d, sectionEntities) {
     .join('');
 
   return `<div class="card sched-card"><h3>Schedules${help(
-    'The device runs these on its own clock — this app answers when it asks. Times are local, and nothing is set for you: a schedule you have not filled in is empty, and the device is simply not restricted. A period that ends before it starts runs through midnight, which is normal and is how PetKit’s own app writes quiet hours.',
+    'Times are local to the device. Camera and light periods define active hours; quiet periods suppress their function while its quiet-mode switch is on. A period ending before it starts crosses midnight. Saving stores the schedule; sending it does not confirm that the device applied it.',
   )}</h3>
+    ${d.pending_settings && d.pending_settings.length ? '<p class="sub">Settings saved locally. Waiting to send pending changes to the device.</p>' : ''}
     ${
       times.length
         ? `<div class="ctrls">${times.map(e => controlRow(d.id, e)).join('')}</div>
@@ -493,7 +504,7 @@ onAction('sched-save', async el => {
     if (res && res.error) return toast(res.error);
     SCHEDULE_EDITS.delete(schedKey(id, target));
     toast(
-      `Saved — ${res && res.delivered === 'mqtt' ? 'sent to the device' : 'the device picks it up on its next poll'}`,
+      `Saved — ${res && res.delivered === 'mqtt' ? 'sent over MQTT; application unconfirmed' : 'pending delivery; waiting for a device connection'}`,
     );
     scheduleDetail(id);
   } catch (e) {

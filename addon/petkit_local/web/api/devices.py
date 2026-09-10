@@ -120,6 +120,7 @@ def _device_summary(d: Device, ble_registry: BLERegistry | None, hub: EventHub,
         # for above. Absent when the broker is not running (tests, --no-mqtt).
         "mqtt_delivery": _delivery_view(broker, d),
         "queue": len(d.command_queue),
+        "pending_settings": sorted(d.config.get("pending_settings", {})),
         "http_count": diag.get("http_count", 0),
         "mqtt_count": diag.get("mqtt_count", 0),
         "entities": len(get_entities_for_device(d)),
@@ -339,7 +340,7 @@ async def api_send_command(request: web.Request) -> web.Response:
         if not suffix or envelope is None:
             return web.json_response({"error": "need action, entity+value, or suffix+payload"}, status=400)
 
-    return await _deliver(hub, bridge, d, suffix, envelope, transport)
+    return await _deliver(hub, bridge, d, suffix, envelope, transport, registry=reg)
 
 
 _TZ_MIN, _TZ_MAX = -12.0, 14.0

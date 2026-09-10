@@ -83,31 +83,22 @@ FOUNTAIN_NUMBERS = [
               unit="h", min_value=1, max_value=24, step=1),
 ]
 
-#: How often the W7H runs each of its two water-treatment cycles, in DAYS.
-#:
-#: `switches.py` explains why these were withheld until now: a number needs a
-#: range, and the firmware map that named the handlers gave none. The
-#: capture-derived map supplied 2026-08-09 does — "N = every N days", with 1 and
-#: 7 both observed — which is the encoding, not the bound.
-#:
-#: 1..30 is therefore a SOFT ceiling: a month is well past any cleaning interval
-#: the app offers, and the device does its own clamping. It exists to stop an
-#: obviously-wrong value from reaching hardware, not because 30 was measured.
-#:
-#: The matching times are `time` entities, not numbers — see `times.py`.
+#: W7H owner-supplied firmware/app mapping (2026-09-10): cycles 1–7 days,
+#: volume 1–9. Execution times remain seconds since midnight (times.py).
 FOUNTAIN_W7H_NUMBERS = [
+    EntityDef(component="number", key="fountain_time", name="Fountain Time",
+              value_path="settings.fountainTime", icon="mdi:clock-outline",
+              unit="h", min_value=1, max_value=24, step=1),
+    EntityDef(component="number", key="sleep_time", name="Sleep Time",
+              value_path="settings.sleepTime", icon="mdi:sleep",
+              unit="h", min_value=1, max_value=24, step=1),
     EntityDef(component="number", key="water_change_cycle", name="Drain & Refill Cycle",
               value_path="settings.waterChangeCycle", icon="mdi:water-refresh",
-              unit="d", min_value=1, max_value=30, step=1),
+              unit="d", min_value=1, max_value=7, step=1),
     EntityDef(component="number", key="flush_cycle", name="Drain & Flush Cycle",
               value_path="settings.flushCycle", icon="mdi:water-sync",
-              unit="d", min_value=1, max_value=30, step=1),
-    # Same field and the same unverified 0-9 as LITTER_CAMERA_NUMBERS above,
-    # and for a weaker reason still: the W7H map observed exactly one value (1)
-    # and says outright that the range was not established. Shipped anyway
-    # because a volume control nobody can reach is worse than a wide one, and
-    # the device clamps.
+              unit="d", min_value=1, max_value=7, step=1),
     EntityDef(component="number", key="volume", name="Volume",
               value_path="settings.volume", icon="mdi:volume-high",
-              min_value=0, max_value=9, step=1),
+              min_value=1, max_value=9, step=1),
 ]

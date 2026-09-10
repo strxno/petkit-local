@@ -157,8 +157,7 @@ def test_a_fountain_is_served_the_ranges_its_firmware_reads():
     d = Device(device_type="w7h", petkit_id=1, serial_number="SN")
     served = payloads.to_multi_config(d)["result"]
     assert set(served) == {
-        "lightMultiRange", "toneMultiRange", "distrubMultiRange",
-        "detectMultiRange", "cameraMultiRange",
+        "lightMultiRange", "toneMultiRange", "cameraMultiRange",
         "awDisturbMultiRange", "wlDisturbMultiRange",
     }
     assert "lightAssistMultiRange" not in served
@@ -233,6 +232,26 @@ async def test_saving_a_range_stores_it_and_pushes_the_doubled_encoding():
         assert suffix == "property/set"
         assert envelope["params"] == {
             "distrubMultiRange": '{"distrubMultiRange":[[1425,585],[0,1]]}'}
+    finally:
+        await c.close()
+
+
+async def test_w7h_offline_edits_keep_only_latest_and_survive_restart():
+    app, reg, bridge = _panel("w7h")
+    d = reg.get(1)
+    d.mqtt_connected = False
+    c = await _client(app)
+    try:
+        await _save(c, "toneMultiRange", [[0, 1]])
+        status, out = await _save(c, "toneMultiRange", [])
+        assert status == 200
+        assert out["delivered"] == "heartbeat-queue"
+        assert not bridge.sent
+        assert len(d.command_queue) == 1
+        restored = Device.from_dict(json.loads(json.dumps(d.to_dict())))
+        assert restored.config["pending_settings"] == {
+            "toneMultiRange": '{"toneMultiRange":[]}'}
+        assert _decode(payloads.to_multi_config(restored), "toneMultiRange") == []
     finally:
         await c.close()
 
