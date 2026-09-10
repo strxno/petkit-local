@@ -123,6 +123,8 @@ def _to_heartbeat_content(cmd: Any) -> str:
     if not isinstance(cmd, dict):
         return json.dumps(cmd)
 
+    cmd.pop("_service_suffix", None)
+
     # Already in heartbeat format (has msgType)
     if "msgType" in cmd:
         if "timestamp" not in cmd:

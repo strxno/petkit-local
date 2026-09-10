@@ -63,6 +63,16 @@ def _weight_of(event: dict) -> float | None:
     return to_float(c.get("pet_weight", c.get("petWeight")), None)
 
 
+def _recalc_weight_of(event: dict) -> float | None:
+    """The optional on-device tool's independently RECALCULATED weight, if any.
+
+    Merged into `content_json` by `http/handlers/weigh_recalc.py` when a
+    pushed reading is matched to this visit — most installs never have this
+    key at all, which is the point (see `ai/weight.py::_visit_weight`)."""
+    c = _content_of(event)
+    return to_float(c.get("recalc_pet_weight_g"), None)
+
+
 def _duration_of(anchor: dict, pet_in: dict | None) -> float | None:
     """Visit duration. Preferred source: the anchor's own `time_in`/
     `time_out` (confirmed present on a real T5's event_type "10" visit
@@ -133,6 +143,7 @@ def _session_from_visit(anchor: dict, pet_in: dict | None, media: list[dict]) ->
     than from the bare code.
     """
     duration = _duration_of(anchor, pet_in)
+    recalc_weight = _recalc_weight_of(anchor)
     return {
         "kind": "visit",
         "id": anchor["id"],
@@ -145,7 +156,10 @@ def _session_from_visit(anchor: dict, pet_in: dict | None, media: list[dict]) ->
         "event_type": anchor.get("event_type"),
         "event_kind": codes.KIND_TOILET,
         "duration_sec": duration,
-        "weight": _weight_of(anchor),
+        # The recalculated weight, when this visit has one, IS simply the
+        # better number (see `ai/weight.py::_visit_weight`) -- shown in place
+        # of the box's own on the card, not alongside it.
+        "weight": recalc_weight if recalc_weight is not None else _weight_of(anchor),
         "content": _content_of(anchor),
         "state": state_of_row(anchor),
         "sub_events": [],
