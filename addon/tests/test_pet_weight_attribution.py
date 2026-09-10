@@ -87,6 +87,26 @@ def test_an_unconfirmed_visit_falls_through_to_weight_matching():
     assert result.basis == "weight"
 
 
+def test_recalc_weight_takes_precedence_over_the_box_s_own_pet_weight():
+    """`recalc_pet_weight_g` -- the optional on-device tool's independently
+    recalculated weight -- must win when present, even when the box's own
+    number would have pointed at a DIFFERENT pet."""
+    visit = {"pet_id": None, "pet_weight": 5100, "recalc_pet_weight_g": 3220}
+    result = attribute_visit(visit, [CAT_A, CAT_B])
+    assert result.pet_id == 1
+    assert result.basis == "weight"
+
+
+def test_a_none_recalc_weight_falls_back_to_pet_weight_rather_than_dropping_the_visit():
+    """`events/metrics.py`'s flatten step always sets `recalc_pet_weight_g`,
+    explicitly None for the vast majority of visits with no recalculation --
+    that None must not be mistaken for "use nothing"."""
+    visit = {"pet_id": None, "pet_weight": 3220, "recalc_pet_weight_g": None}
+    result = attribute_visit(visit, [CAT_A, CAT_B])
+    assert result.pet_id == 1
+    assert result.basis == "weight"
+
+
 def test_weight_path_never_returns_confirmed():
     for observed in (None, 100.0, 3200.0, 4075.0, 999999.0):
         for profiles in ([], [CAT_A], [CAT_A, CAT_B]):

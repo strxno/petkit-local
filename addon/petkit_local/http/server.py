@@ -58,6 +58,7 @@ from petkit_local.http.handlers.stubs import (
     handle_sound_get,
     handle_attire_over,
 )
+from petkit_local.http.handlers.weigh_recalc import handle_weigh_recalc_push
 from petkit_local.patchers.common import STAGE_DIR
 from petkit_local.utils.paths import UnsafePathError, safe_join
 
@@ -146,6 +147,7 @@ def create_app(registry: DeviceRegistry, config: dict) -> web.Application:
     app.on_cleanup.append(_drain_media_tasks)
 
     app.router.add_route("*", "/patcher/download/{device_id}/{filename}", handle_patcher_download)
+    app.router.add_route("*", "/recalc/weigh/{device_id}", handle_weigh_recalc_push)
     app.router.add_route("*", "/faces/{filename}", handle_faces)
     app.router.add_route("*", "/", handle_index)
     app.router.add_route("*", "/{path:.*}", handle_catchall)

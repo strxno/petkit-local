@@ -73,7 +73,10 @@ def build_weight_profiles(pets: list[dict[str, Any]],
     (`web/api/timeline.py`) so "how a pet's weight profile is built" stays
     defined in exactly one place.
     """
-    flattened = [{**v, "pet_weight": ingest._weight_of(v)} for v in visits]
+    flattened = [
+        {**v, "pet_weight": ingest._weight_of(v), "recalc_pet_weight_g": ingest._recalc_weight_of(v)}
+        for v in visits
+    ]
     return weight_mod.build_profiles(pets, flattened)
 
 
@@ -103,11 +106,13 @@ def build_insights(pets: list[dict[str, Any]], visits: list[dict[str, Any]],
         pet_in = {"ts": pet_in_ts} if pet_in_ts is not None else None
 
         observed_weight = ingest._weight_of(visit)
+        recalc_weight = ingest._recalc_weight_of(visit)
         duration = ingest._duration_of(visit, pet_in)
         display_ts = ingest._started_at(visit, pet_in) or visit.get("ts")
 
         attribution = weight_mod.attribute_visit(
-            {"pet_id": visit.get("pet_id"), "pet_weight": observed_weight},
+            {"pet_id": visit.get("pet_id"), "pet_weight": observed_weight,
+             "recalc_pet_weight_g": recalc_weight},
             profiles, device_id=visit.get("device_id"))
 
         visit_rows.append({
@@ -115,7 +120,10 @@ def build_insights(pets: list[dict[str, Any]], visits: list[dict[str, Any]],
             "display_ts": display_ts,
             "device_id": visit.get("device_id"),
             "duration_sec": duration,
-            "weight": observed_weight,
+            # The recalculated weight, when this visit has one, is simply the
+            # better number (see `ai/weight.py::_visit_weight`) -- shown in
+            # place of the box's own, not alongside it.
+            "weight": recalc_weight if recalc_weight is not None else observed_weight,
             # Face-confirmed identity. `attributed_pet_id` carries the SAME
             # pet when attribution's basis is "weight" and stays None here so
             # a card never shows two different-looking chips for one pet.

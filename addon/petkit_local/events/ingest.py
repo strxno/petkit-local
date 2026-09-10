@@ -28,9 +28,9 @@ from petkit_local.events.normalize import (CATEGORY_CLOUD_DOUBLE, CATEGORY_HEALT
                                            is_detail_event, parse_event_report_form,
                                            telemetry_only)
 from petkit_local.events.sessions import (CYCLE_TAIL_WINDOW_SEC, SUB_EVENT_WINDOW_SEC,
-                                          _duration_of, _started_at, _weight_of,
-                                          content_of_row, filter_counts, group_sessions,
-                                          matches_filter, state_of_row)
+                                          _duration_of, _recalc_weight_of, _started_at,
+                                          _weight_of, content_of_row, filter_counts,
+                                          group_sessions, matches_filter, state_of_row)
 
 #: Also what marks the imports above as used, so the lint gate does not read a
 #: re-export as dead code. The private names are here because callers outside
@@ -57,6 +57,7 @@ __all__ = [
     "_duration_of",
     "_extract_pet_ref",
     "_extract_score",
+    "_recalc_weight_of",
     "_started_at",
     "_weight_of",
     "apply_derived_state",

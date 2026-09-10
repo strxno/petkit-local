@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -50,6 +51,25 @@ async def test_update_event_fields_commits_without_a_transaction(event_store: Ev
 
     reopened = EventStore(event_store._path)
     assert (await reopened.get_event(eid))["event_kind"] == "cleaning"
+
+
+async def test_merge_event_content_adds_keys_without_clobbering_existing_ones(
+        event_store: EventStore):
+    eid = await event_store.upsert_event({
+        "device_id": 1, "event_type": "10", "ts": 10.0,
+        "content_json": '{"pet_weight": 3200, "shit_weight": 12}'})
+    assert await event_store.merge_event_content(
+        eid, recalc_pet_weight_g=3195.4, recalc_weight_confirmed=True) is True
+
+    content = json.loads((await event_store.get_event(eid))["content_json"])
+    assert content == {
+        "pet_weight": 3200, "shit_weight": 12,
+        "recalc_pet_weight_g": 3195.4, "recalc_weight_confirmed": True,
+    }
+
+
+async def test_merge_event_content_on_an_unknown_event_is_a_no_op(event_store: EventStore):
+    assert await event_store.merge_event_content(999999, recalc_pet_weight_g=1.0) is False
 
 
 async def test_transaction_batches_writes_into_one_commit(event_store: EventStore):

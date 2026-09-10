@@ -365,6 +365,31 @@ class EventStore:
                 execution_options=_NO_SYNC)
         return True
 
+    async def merge_event_content(self, event_id: int, **kv: Any) -> bool:
+        """Merge `kv` into one event's `content_json`, keeping every key
+        already there.
+
+        `update_event_fields` overwrites `content_json` wholesale, which is
+        right for ingest (it always has the full payload) but wrong for
+        enrichment (`http/handlers/weigh_recalc.py` adds a couple of keys to
+        an already-stored visit's content long after it was written) — a
+        blind overwrite there would erase everything the box itself reported.
+
+        A plain read-then-write, not a `json_set`-style atomic SQL merge:
+        the only other writer of a given event's `content_json` is its own
+        one-time ingest, long finished by the time anything could enrich it,
+        so the small race window this leaves is not a real one in practice.
+
+        Returns:
+            False if `event_id` no longer exists, True otherwise.
+        """
+        row = await self.get_event(event_id)
+        if row is None:
+            return False
+        content = json.loads(row.get("content_json") or "{}")
+        content.update(kv)
+        return await self.update_event_fields(event_id, content_json=json.dumps(content))
+
     async def event_by_related(self, related_event: str) -> dict[str, Any] | None:
         """Most recent event sharing this related_event (session) id.
 

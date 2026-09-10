@@ -170,13 +170,32 @@ def attribute_visit(visit: dict[str, Any], profiles: list[WeightProfile],
     if visit.get("pet_id") is not None:
         return Attribution(pet_id=visit["pet_id"], basis="face", grade=codes.CONFIRMED)
 
-    observed = to_float(
-        visit.get("weight_g", visit.get("pet_weight", visit.get("petWeight"))), None)
-    return attribute(observed, profiles, device_id)
+    return attribute(_visit_weight(visit), profiles, device_id)
 
 
 def _visit_weight(visit: dict[str, Any]) -> float | None:
-    """The observed weight on a `visit_summaries`-shaped row, if any."""
+    """The observed weight on a `visit_summaries`-shaped row, if any.
+
+    `recalc_pet_weight_g` — when a visit's weight was independently
+    RECALCULATED from the same underlying scale signal by the optional
+    on-device tool (`http/handlers/weigh_recalc.py`) — is preferred over
+    every other key: it is the SETTLED weight rather than the box's own
+    landing-impact-biased peak, validated this session against an
+    independently-weighed cat (2.4 g off) and against the box's own numbers
+    (~1% off, systematically lower). It is simply the best available number
+    when present; everything else here is unchanged firmware-schema fallback.
+
+    Checked with `is not None` rather than folded into one `dict.get(...,
+    dict.get(...))` chain: a caller (`events/metrics.py`'s flatten step)
+    always sets `recalc_pet_weight_g`, explicitly `None` when this visit has
+    no recalculation — `.get`'s default only fires when a key is ABSENT, so
+    chaining would find that `None` and stop right there, never falling
+    through to `pet_weight` for the vast majority of visits with no
+    recalculated reading at all.
+    """
+    recalc = to_float(visit.get("recalc_pet_weight_g"), None)
+    if recalc is not None:
+        return recalc
     return to_float(
         visit.get("weight_g", visit.get("pet_weight", visit.get("petWeight"))), None)
 
