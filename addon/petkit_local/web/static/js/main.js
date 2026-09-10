@@ -17,6 +17,7 @@
 //   ws         the WebSocket that drives every live refresh
 //   capture · setup · patchers · provision   one tab each
 //   timeline   the day view; media  the thumbnails, player and gallery
+//   insights   per-pet visit metrics; charts  the hand-rolled SVG it draws
 //   pets       the AI/Pets tab; cropper  the mugshot cropper it opens
 //
 // SECURITY INVARIANT, and the reason the split changes nothing about it:
@@ -44,6 +45,7 @@ import './patchers.js';
 import './provision.js';
 import './timeline.js';
 import './media.js';
+import './insights.js';
 import './pets.js';
 import './cropper.js';
 

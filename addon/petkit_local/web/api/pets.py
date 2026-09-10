@@ -23,13 +23,53 @@ from aiohttp import web
 from petkit_local.ai.pets import cloud_pets
 from petkit_local.events.store import MAX_FACES_PER_PET
 from petkit_local.http.cloud_fetch import CLOUD_TIMEOUT, CloudRefused, fetch_as_device
-from petkit_local.utils.coerce import to_int
+from petkit_local.utils.coerce import to_float, to_int
 from petkit_local.utils.paths import UnsafePathError, safe_join
 from petkit_local.web.api._common import (
     _cloud_upstream, _face_summaries, _json_body, _path_id, _pets_by_id,
 )
 
 log = logging.getLogger(__name__)
+
+# Grams, matching the device's own `content.pet_weight`/`petWeight` (see
+# events/decode.py::_grams) and the `unit="g"` HA already publishes on
+# `last_visit_weight`. Nothing else in the repo reads `Pet.weight` today, so
+# there was no established unit to defer to — grams is the one the box itself
+# speaks, which is what a weight typed here is eventually compared against
+# (ai/weight.py). The panel's input is in kg (what an owner thinks in) and
+# converts before sending; deciding here means every future reader — HA
+# entities, the Insights tab, ai/weight.py — can trust the column without a
+# second conversion table.
+#
+# Bounds are deliberately generous rather than cat-specific: a newborn kitten
+# is a few hundred grams, and this column has no way to know it is not
+# guarding a dog. Anything outside this is not a data-entry typo so much as
+# certainly not a household pet's weight, and is worth refusing rather than
+# silently storing.
+_MIN_PET_WEIGHT_G = 50.0
+_MAX_PET_WEIGHT_G = 100_000.0
+
+
+def _coerce_pet_weight(value: Any) -> tuple[float | None, str | None]:
+    """Validate an incoming `weight` field. Returns `(weight_g, error)`.
+
+    `None` is a valid weight (clears it) and returns `(None, None)`. Anything
+    that is not a number, or a number outside the plausible range, is an
+    error rather than a silent drop — unlike `device_ids`/`device_pet_ids`
+    below, a bad weight has no "skip and keep going" reading: the field is
+    for something *specific* people will type into (ai/weight.py's matching),
+    and a value we could not parse must never be stored as if it were zero.
+    """
+    if value is None:
+        return None, None
+    weight = to_float(value, None)
+    if weight is None:
+        return None, "weight must be a number"
+    if not (_MIN_PET_WEIGHT_G <= weight <= _MAX_PET_WEIGHT_G):
+        return None, (
+            f"weight must be between {_MIN_PET_WEIGHT_G:g} and "
+            f"{_MAX_PET_WEIGHT_G:g} grams")
+    return weight, None
 
 
 async def api_pets_list_create(request: web.Request) -> web.Response:
@@ -57,7 +97,11 @@ async def api_pets_list_create(request: web.Request) -> web.Response:
     except (TypeError, ValueError):
         device_ids = []
 
-    pet = await pet_registry.create(name, device_ids=device_ids, weight=body.get("weight"))
+    weight, weight_error = _coerce_pet_weight(body.get("weight"))
+    if weight_error:
+        return web.json_response({"error": weight_error}, status=400)
+
+    pet = await pet_registry.create(name, device_ids=device_ids, weight=weight)
     ha_publisher = request.app.get("ha_publisher")
     if ha_publisher is not None:
         await ha_publisher.publish_pet_discovery(pet)
@@ -113,7 +157,10 @@ async def api_pet_detail(request: web.Request) -> web.Response:
         except (TypeError, ValueError):
             pass
     if "weight" in body:
-        fields["weight"] = body["weight"]
+        weight, weight_error = _coerce_pet_weight(body["weight"])
+        if weight_error:
+            return web.json_response({"error": weight_error}, status=400)
+        fields["weight"] = weight
 
     pet = await pet_registry.update(pid, **fields)
     if pet is None:

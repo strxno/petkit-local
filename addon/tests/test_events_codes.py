@@ -155,6 +155,16 @@ def test_anchor_codes_cover_every_card_heading_kind():
         assert code in codes.ANCHOR_CODES, f"{code} can no longer head a card"
 
 
+def test_visit_summary_codes_are_exactly_the_visit_close_out():
+    """The one report per visit that CLOSES it — used to dedupe a visit's own
+    mid-visit samples (code "9") out of counts like `pet_visit_stats`. Every
+    member must also be an anchor: a visit summary always heads its card."""
+    assert codes.VISIT_SUMMARY_CODES == frozenset({"10", "pet_out"})
+    assert codes.VISIT_SUMMARY_CODES <= codes.ANCHOR_CODES
+    assert "9" not in codes.VISIT_SUMMARY_CODES
+    assert "pet_in" not in codes.VISIT_SUMMARY_CODES
+
+
 def test_codes_for_filters_by_family():
     """Hardware one model lacks must not be advertised on it."""
     t4, t5, t6 = (codes.codes_for(d) for d in ("t4", "t5", "t6"))

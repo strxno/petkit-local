@@ -220,6 +220,14 @@ class Pet(Base):
     `face_id`/`photo_path` are LEGACY, from when a pet had exactly one photo.
     `PetFace` replaced them; `EventStore.connect` migrates any surviving value
     across and nothing reads these two afterwards.
+
+    `weight` is GRAMS — matching `content.pet_weight` on the wire
+    (`events/decode.py::_grams`) and the `unit="g"` HA already publishes on
+    `last_visit_weight`, so a value entered here needs no conversion to be
+    compared against a visit's observed weight (`ai/weight.py`). Validated on
+    the way in by `web/api/pets.py::_coerce_pet_weight`; a pet with none set
+    has `weight IS NULL`, not `0` — zero is a real, if unlikely, weight and
+    must not be read as "unknown".
     """
 
     __tablename__ = "pets"

@@ -1266,6 +1266,19 @@ ALL_EVENT_CODES: dict[str, EventCode] = {
 
 DETAIL_CODES = _codes_where(ALL_EVENT_CODES, detail=True)
 ANCHOR_CODES = _codes_where(ALL_EVENT_CODES, anchor=True)
+#: The ONE report per visit that closes it — code "10" and `pet_out` today.
+#: `role=ROLE_VISIT_SUMMARY` alone would already be unique (nothing else uses
+#: the role), but `kind=KIND_TOILET` is included anyway: `ALL_EVENT_CODES`
+#: merges namespaces with the litter table winning collisions (see the
+#: docstring above it), so a bare code string is category-blind on its own --
+#: a future non-toilet code that reused this role would silently join the set
+#: without the kind guard. A visit's OTHER reports (a code "9" mid-visit
+#: weight sample, an MQTT `pet_in`) share the visit's `related_event` but must
+#: never be counted as a visit themselves -- `EventStore.pet_visit_stats` and
+#: `EventStore.visit_summaries` both filter on this rather than on
+#: `event_kind == KIND_TOILET` alone, which a single visit satisfies several
+#: times over.
+VISIT_SUMMARY_CODES = _codes_where(ALL_EVENT_CODES, role=ROLE_VISIT_SUMMARY, kind=KIND_TOILET)
 DONE_CODES = _codes_where(ALL_EVENT_CODES, role=ROLE_DONE)
 #: Completion steps a user actually sees. A cycle emits several `role=DONE`
 #: steps (a cleaning cycle closes with both a light cycle and the cleaning

@@ -495,9 +495,17 @@ function sessionCard(s) {
   }
   // Who the device's NPU recognised. Absent when it recognised nobody, which
   // is normal for a passing glance — most "appeared" episodes have no match.
+  //
+  // A WEIGHT-inferred guess (web/api/timeline.py's attribution pass, backed by
+  // ai/weight.py — never the device, never written to the database) renders as
+  // a visibly different chip: dashed border, a `~` marker, and a title
+  // spelling out that this is an inference from the box's own scale, not a
+  // face match, so it can never be mistaken for one at a glance.
   const pet = s.pet_name
     ? `<span class="tl-pet">${s.pet_photo_url ? `<img src="${BASE}${esc(s.pet_photo_url)}" alt="">` : ''}${esc(s.pet_name)}</span>`
-    : '';
+    : s.attributed_pet_name
+      ? `<span class="tl-pet tl-pet-inferred" title="Guessed from this visit's weight (${esc(s.attribution_grade || 'inferred')}) — the camera did not recognise a face. Set in AI / Pets or check Insights.">${s.attributed_pet_photo_url ? `<img src="${BASE}${esc(s.attributed_pet_photo_url)}" alt="">` : ''}~${esc(s.attributed_pet_name)}</span>`
+      : '';
   const head = `<span class="tl-kind ${cls}">${esc(tag)}</span>${pet}${title}`;
   const subs = s.sub_events || [];
   const primary = subs.filter(e => !e.detail),

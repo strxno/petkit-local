@@ -11,16 +11,27 @@ averaging 1.2 kB.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from aiohttp import web
 
+from petkit_local.ai import weight as weight_mod
 from petkit_local.events import codes, decode, ingest
+from petkit_local.events.metrics import build_weight_profiles
 from petkit_local.utils.coerce import to_int
 from petkit_local.utils.const import device_display_name
 from petkit_local.utils.timeutil import local_day_bounds, local_offset_hours
 from petkit_local.web.api._common import _pet_fields, _pets_by_id
 from petkit_local.web.api.media import _has_media, _session_media_urls
+
+#: How far back a visit's weight profile is trained from, for the Timeline's
+#: weight-inferred badge — the SAME idea `ai/weight.py`'s module docstring
+#: describes ("the weeks a profile is trusted for"), just a concrete number.
+#: One day's own rows are nowhere near enough face-confirmed samples to
+#: corroborate a profile (`ai/weight.py::MIN_CORROBORATING_SAMPLES`), so this
+#: is a SEPARATE, wider query from the day being displayed.
+PROFILE_WINDOW_DAYS = 60
 
 
 async def api_timeline(request: web.Request) -> web.Response:
@@ -70,6 +81,22 @@ async def api_timeline(request: web.Request) -> web.Response:
     # handful of pets, and a card carrying a bare `pet_id` is what made the
     # Timeline silent about which cat it was showing.
     pets = await _pets_by_id(request)
+
+    # Weight-inferred attribution for visits the device's own face recognition
+    # left unattributed — never overrides a confirmed `pet_id`, never written
+    # back to the database (see `ai/weight.py`'s module docstring for why).
+    # The wider profile-training query below only runs when there is at least
+    # one candidate for it to help: a day with every visit already confirmed,
+    # or with none at all, costs nothing extra.
+    unconfirmed_ids = {s["id"] for s in filtered if s.get("kind") == "visit"
+                       and s.get("pet_id") is None and s.get("weight") is not None}
+    profiles: list[weight_mod.WeightProfile] = []
+    if unconfirmed_ids and pets:
+        now = time.time()
+        training_visits = await store.visit_summaries(
+            now - PROFILE_WINDOW_DAYS * 86400, now)
+        profiles = build_weight_profiles(list(pets.values()), training_visits)
+
     payload: list[dict[str, Any]] = []
     for s in filtered:
         dev = reg.get(s.get("device_id"))
@@ -92,6 +119,18 @@ async def api_timeline(request: web.Request) -> web.Response:
                 "media": slots if _has_media(slots) else None,
             })
         content = s.get("content") or {}
+
+        # Weight-inferred, only ever a SIBLING fact to a confirmed `pet_id`,
+        # never a substitute — `attribute()` itself refuses to return
+        # `grade=CONFIRMED`, so `attributed_pet_id` is always None on a row
+        # that already has `pet_id` set.
+        attribution = (
+            weight_mod.attribute(s.get("weight"), profiles, device_id=s.get("device_id"))
+            if s["id"] in unconfirmed_ids
+            else weight_mod.Attribution(pet_id=None, basis=None, grade=None)
+        )
+        attributed_fields = _pet_fields(pets, attribution.pet_id)
+
         payload.append({
             "kind": s["kind"], "id": s["id"], "related_event": s.get("related_event"),
             "device_id": s.get("device_id"),
@@ -102,6 +141,10 @@ async def api_timeline(request: web.Request) -> web.Response:
             "display_ts": s.get("display_ts") or s.get("ts"),
             "pet_id": s.get("pet_id"), "event_type": s.get("event_type"),
             **_pet_fields(pets, s.get("pet_id")),
+            "attributed_pet_id": attribution.pet_id,
+            "attributed_pet_name": attributed_fields["pet_name"],
+            "attributed_pet_photo_url": attributed_fields["pet_photo_url"],
+            "attribution_grade": attribution.grade,
             # A visit builds its own summary line (duration/weight); every
             # other card is titled by its event's label, now decoded from the
             # content too, so a lone cleaning reads "Manual cleaning completed"

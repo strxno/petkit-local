@@ -189,10 +189,20 @@ function petCard(p, ds, recognisingIds) {
   const faces = p.faces || [];
   const full = faces.length >= MAX_FACES;
 
+  // Weight is stored in GRAMS (web/api/pets.py::_coerce_pet_weight) but shown
+  // and edited in kg — what an owner thinks in. `p.weight == null` means
+  // "not set", rendered as a prompt rather than "0 kg", which would read as a
+  // real measurement.
+  const weightKg = p.weight != null ? (p.weight / 1000).toFixed(2) : '';
+  const weightLabel = p.weight != null ? `${weightKg} kg` : 'set weight';
+
   return `<div class="card petcard">
     <div class="pet-head">
       <b class="pet-name" data-action="rename-pet" data-id="${esc(p.id)}"
          title="Click to rename">${esc(p.name)}</b>
+      <span class="pet-weight mut" data-action="edit-pet-weight" data-id="${esc(p.id)}"
+            data-weight="${esc(weightKg)}" title="Click to set weight — used to guess which
+cat used the box when the camera doesn't recognise a face">${esc(weightLabel)}</span>
       <span class="pet-devs">${chips || '<span class="mut">no devices assigned</span>'}</span>
       <button class="ghost act" data-action="delete-pet" data-id="${esc(p.id)}">Delete</button>
     </div>
@@ -278,6 +288,56 @@ onAction('rename-pet', el => {
     });
     if (r.error) return toast('Error: ' + r.error);
     toast('Renamed');
+    loadPets();
+  };
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+});
+
+// Same in-place-input pattern as rename-pet, and the same double-save latch:
+// Enter/Escape/blur can all fire for one edit. The input is a number in KG;
+// the API stores grams (`_coerce_pet_weight`), so the conversion happens here,
+// once, rather than teaching every future reader of `pet.weight` about kg.
+onAction('edit-pet-weight', el => {
+  const id = el.dataset.id;
+  const beforeKg = el.dataset.weight;
+  const input = document.createElement('input');
+  input.className = 'pet-weight-edit';
+  input.type = 'number';
+  input.step = '0.01';
+  input.min = '0';
+  input.placeholder = 'kg';
+  input.value = beforeKg;
+
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const text = input.value.trim();
+    input.replaceWith(el);
+    if (!save || text === beforeKg) return;
+    // Blank clears the weight; a live server round-trip is worth it here
+    // rather than trusting the client's own parse, since ai/weight.py's
+    // matching depends on this value being exactly what a visit is compared
+    // against.
+    const weight = text === '' ? null : Math.round(parseFloat(text) * 1000);
+    if (text !== '' && (weight === null || Number.isNaN(weight))) {
+      return toast('Enter a number in kg');
+    }
+    const r = await api('pets/' + encodeURIComponent(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weight }),
+    });
+    if (r.error) return toast('Error: ' + r.error);
+    toast('Saved');
     loadPets();
   };
 
